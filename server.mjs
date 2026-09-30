@@ -19,12 +19,55 @@ const dataDir = resolve(process.env.DATA_DIR || join(root, "data"));
 mkdirSync(dataDir, { recursive: true });
 const db = new DatabaseSync(join(dataDir, "stride.sqlite"));
 db.exec(`PRAGMA journal_mode = WAL;
-CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS profile (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS goal (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS plans (id INTEGER PRIMARY KEY AUTOINCREMENT, version INTEGER NOT NULL, created_at TEXT NOT NULL, data TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS activities (id INTEGER PRIMARY KEY AUTOINCREMENT, file_hash TEXT UNIQUE, created_at TEXT NOT NULL, data TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS proposals (id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT NOT NULL, created_at TEXT NOT NULL, data TEXT NOT NULL);`);
+CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL COLLATE NOCASE UNIQUE, password_hash TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0 CHECK(is_admin IN (0,1)), created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS profile (user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS goal (user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS plans (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, version INTEGER NOT NULL, created_at TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(user_id, version));
+CREATE TABLE IF NOT EXISTS activities (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, file_hash TEXT, created_at TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(user_id, file_hash));
+CREATE TABLE IF NOT EXISTS proposals (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, status TEXT NOT NULL, created_at TEXT NOT NULL, data TEXT NOT NULL);`);
+
+// Upgrade the original single-user schema. Its data is retained in the seeded admin account.
+// Initial CREATEs above are only suitable for fresh databases; rebuild any pre-user tables before using them.
+// SQLite's legacy table shape is detected from the database before the request server starts.
+for (const table of ["profile", "goal", "plans", "activities", "proposals"]) {
+  const cols = db
+    .prepare(`PRAGMA table_info(${table})`)
+    .all()
+    .map((row) => row.name);
+  if (!cols.includes("user_id")) {
+    const legacy = `legacy_${table}`;
+    db.exec(`ALTER TABLE ${table} RENAME TO ${legacy}`);
+    const definitions = {
+      profile:
+        "CREATE TABLE profile (user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, data TEXT NOT NULL)",
+      goal: "CREATE TABLE goal (user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, data TEXT NOT NULL)",
+      plans:
+        "CREATE TABLE plans (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, version INTEGER NOT NULL, created_at TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(user_id, version))",
+      activities:
+        "CREATE TABLE activities (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, file_hash TEXT, created_at TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(user_id, file_hash))",
+      proposals:
+        "CREATE TABLE proposals (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, status TEXT NOT NULL, created_at TEXT NOT NULL, data TEXT NOT NULL)",
+    }[table];
+    const colsToCopy =
+      table === "profile" || table === "goal"
+        ? ["user_id", "data"]
+        : [
+            "id",
+            "user_id",
+            ...(table === "plans"
+              ? ["version", "created_at", "data"]
+              : table === "activities"
+                ? ["file_hash", "created_at", "data"]
+                : ["status", "created_at", "data"]),
+          ];
+    db.exec(
+      `${definitions}; INSERT INTO ${table} (${colsToCopy.join(",")}) SELECT ${colsToCopy.map((column) => (column === "user_id" ? "1" : column)).join(",")} FROM ${legacy}; DROP TABLE ${legacy};`,
+    );
+  }
+}
+db.exec(`CREATE INDEX IF NOT EXISTS plans_by_user ON plans(user_id, version);
+CREATE INDEX IF NOT EXISTS activities_by_user ON activities(user_id, created_at);
+CREATE INDEX IF NOT EXISTS proposals_by_user ON proposals(user_id, status, id);`);
 
 const sessions = new Map();
 const loginFailures = new Map();
@@ -75,16 +118,6 @@ function cookies(req) {
       .filter(([k, v]) => k && v),
   );
 }
-function sessionFor(req) {
-  const token = cookies(req).stride_session;
-  const expires = token && sessions.get(token);
-  if (!expires || expires < Date.now()) {
-    if (token) sessions.delete(token);
-    return false;
-  }
-  sessions.set(token, Date.now() + sessionTtl);
-  return true;
-}
 function secureCookie(token, maxAge = 43200) {
   return `stride_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}`;
 }
@@ -94,8 +127,7 @@ async function passwordHash(password) {
   return `${salt.toString("hex")}:${Buffer.from(derived).toString("hex")}`;
 }
 async function verifyPassword(password, saved) {
-  if (typeof password !== "string" || password.length < 10 || !saved)
-    return false;
+  if (typeof password !== "string" || !saved) return false;
   const [salt, key] = saved.split(":");
   try {
     const candidate = Buffer.from(
@@ -110,23 +142,46 @@ async function verifyPassword(password, saved) {
     return false;
   }
 }
-function profile() {
-  return rowJson(db.prepare("SELECT data FROM profile WHERE id=1").get());
+const adminHash = await passwordHash("admin");
+db.prepare(
+  "INSERT OR IGNORE INTO users(username,password_hash,is_admin,created_at) VALUES('admin',?,1,?)",
+).run(adminHash, new Date().toISOString());
+db.exec("PRAGMA foreign_keys=ON");
+function sessionUser(req) {
+  const token = cookies(req).stride_session;
+  const session = token && sessions.get(token);
+  if (!session || session.expires < Date.now()) {
+    if (token) sessions.delete(token);
+    return null;
+  }
+  session.expires = Date.now() + sessionTtl;
+  return session;
 }
-function goal() {
-  return rowJson(db.prepare("SELECT data FROM goal WHERE id=1").get());
-}
-function latestPlan() {
+function profile(userId) {
   return rowJson(
-    db.prepare("SELECT data FROM plans ORDER BY version DESC LIMIT 1").get(),
+    db.prepare("SELECT data FROM profile WHERE user_id=?").get(userId),
   );
 }
-function latestProposal() {
+function goal(userId) {
+  return rowJson(
+    db.prepare("SELECT data FROM goal WHERE user_id=?").get(userId),
+  );
+}
+function latestPlan(userId) {
+  return rowJson(
+    db
+      .prepare(
+        "SELECT data FROM plans WHERE user_id=? ORDER BY version DESC LIMIT 1",
+      )
+      .get(userId),
+  );
+}
+function latestProposal(userId) {
   const row = db
     .prepare(
-      "SELECT id, status, created_at, data FROM proposals WHERE status='pending' ORDER BY id DESC LIMIT 1",
+      "SELECT id, status, created_at, data FROM proposals WHERE user_id=? AND status='pending' ORDER BY id DESC LIMIT 1",
     )
-    .get();
+    .get(userId);
   return row
     ? {
         id: row.id,
@@ -136,22 +191,22 @@ function latestProposal() {
       }
     : null;
 }
-function activities() {
+function activities(userId) {
   return db
     .prepare(
-      "SELECT id, created_at, data FROM activities ORDER BY created_at DESC",
+      "SELECT id, created_at, data FROM activities WHERE user_id=? ORDER BY created_at DESC",
     )
-    .all()
+    .all(userId)
     .map((row) => ({
       id: row.id,
       createdAt: row.created_at,
       ...JSON.parse(row.data),
     }));
 }
-function saveSingleton(table, data) {
+function saveSingleton(table, userId, data) {
   db.prepare(
-    `INSERT INTO ${table} (id,data) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data`,
-  ).run(JSON.stringify(data));
+    `INSERT INTO ${table} (user_id,data) VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data`,
+  ).run(userId, JSON.stringify(data));
 }
 function parseDate(value) {
   return new Date(`${value}T00:00:00`);
@@ -191,12 +246,13 @@ function genPlan(p, g, version) {
     throw Object.assign(new Error("La fecha del objetivo debe ser futura."), {
       status: 400,
     });
-  const available = Array.isArray(p.trainingDays)
-    ? p.trainingDays.map(Number).filter((x) => x >= 0 && x <= 6)
-    : [];
-  if (available.length < 2)
+  const schedule = Array.isArray(p.trainingSchedule) ? p.trainingSchedule : [];
+  const activeDays = schedule
+    .map((day, index) => ({ day, index }))
+    .filter(({ day }) => day?.strength || day?.treadmill || day?.street);
+  if (activeDays.length < 2)
     throw Object.assign(
-      new Error("Selecciona al menos dos días disponibles para entrenar."),
+      new Error("Selecciona sesiones en al menos dos días de la semana."),
       { status: 400 },
     );
   const start = mondayOf(new Date());
@@ -206,7 +262,25 @@ function genPlan(p, g, version) {
     Math.min(52, Math.ceil((end - start) / (7 * 86400000))),
   );
   const distance = Number(g.distanceKm || 5);
-  const schedule = available.slice().sort((a, b) => a - b);
+  const runSlots = activeDays.flatMap(({ day, index }) => [
+    ...(day.treadmill
+      ? [{ day: index, mode: "treadmill", longRun: false }]
+      : []),
+    ...(day.street
+      ? [{ day: index, mode: "street", longRun: Boolean(day.longRun) }]
+      : []),
+  ]);
+  if (!runSlots.length)
+    throw Object.assign(
+      new Error(
+        "Selecciona al menos una sesión de carrera para preparar una meta de carrera.",
+      ),
+      { status: 400 },
+    );
+  const strengthDays = activeDays
+    .filter(({ day }) => day.strength)
+    .map(({ index }) => index);
+  const qualitySlot = runSlots.findIndex((slot) => !slot.longRun);
   const sessions = [];
   for (let week = 0; week < weeks; week++) {
     const progress = weeks <= 1 ? 1 : week / (weeks - 1);
@@ -223,31 +297,15 @@ function genPlan(p, g, version) {
     const weekStart = new Date(start);
     weekStart.setDate(start.getDate() + week * 7);
     const isRaceWeek = week === weeks - 1;
-    const runDays =
-      schedule.length >= 5
-        ? [
-            schedule[0],
-            schedule[Math.floor(schedule.length / 2)],
-            schedule.at(-1),
-          ]
-        : schedule.length >= 3
-          ? [schedule[0], schedule[Math.floor(schedule.length / 2)]]
-          : [schedule[0]];
-    const strengthDays =
-      schedule.length >= 5
-        ? [schedule[1], schedule[schedule.length - 2]]
-        : schedule.length >= 4
-          ? [schedule[1], schedule.at(-1)]
-          : [schedule.at(-1)];
-    for (const d of runDays) {
+    for (const [runIndex, slot] of runSlots.entries()) {
+      const d = slot.day;
       const date = new Date(weekStart);
       date.setDate(date.getDate() + d);
       if (date > end || isoDay(date) === g.raceDate) continue;
-      const runIndex = runDays.indexOf(d);
-      const longRun = runIndex === runDays.length - 1;
+      const longRun = slot.longRun;
       const base = Math.max(
         2,
-        Number(p.weeklyKm || 12) / Math.max(1, runDays.length),
+        Number(p.weeklyKm || 12) / Math.max(1, runSlots.length),
       );
       const factor = isRaceWeek
         ? 0.55
@@ -263,23 +321,28 @@ function genPlan(p, g, version) {
       const km =
         Math.round(Math.max(2, base * factor * (longRun ? 1.65 : 0.92)) * 10) /
         10;
-      const isQuality = !longRun && runDays.length > 1 && week % 2 === 1;
+      const isQuality = !longRun && runIndex === qualitySlot && week % 2 === 1;
+      const location = slot.mode === "treadmill" ? "cinta" : "calle";
       sessions.push({
-        id: `w${week}-r${runIndex}`,
+        id: `w${week}-r${runIndex}-${slot.mode}`,
         date: isoDay(date),
         day: days[d],
         week: week + 1,
         phase: weekPhase,
         type: "run",
-        title: isRaceWeek
-          ? "Rodaje suave"
-          : cutback
-            ? "Rodaje de descarga"
-            : longRun
-              ? "Tirada larga"
+        title: longRun
+          ? isRaceWeek
+            ? "Tirada larga suave · calle"
+            : cutback
+              ? "Tirada larga de descarga · calle"
+              : "Tirada larga · calle"
+          : isRaceWeek
+            ? `Rodaje suave · ${location}`
+            : cutback
+              ? `Rodaje de descarga · ${location}`
               : isQuality
-                ? "Intervalos controlados"
-                : "Rodaje fácil",
+                ? `Intervalos controlados · ${location}`
+                : `Rodaje fácil · ${location}`,
         distanceKm: km,
         durationMin: Math.round(km * (isQuality ? 6.5 : 7.1)),
         effort: cutback
@@ -287,55 +350,34 @@ function genPlan(p, g, version) {
           : isQuality
             ? "RPE 7 · alegre y controlado"
             : "RPE 3–4 · conversación cómoda",
-        details: isQuality
-          ? `Calentamiento 12 min; ${Math.max(4, Math.round(km / 1.5))} × 2 min a ritmo vivo con 2 min suaves; vuelta a la calma.`
-          : `Ritmo cómodo y respiración controlada durante ${km} km. Prioriza terminar con buenas sensaciones.`,
+        details: `${
+          isQuality
+            ? `Calentamiento 12 min; ${Math.max(4, Math.round(km / 1.5))} × 2 min a ritmo vivo con 2 min suaves; vuelta a la calma.`
+            : `Ritmo cómodo y respiración controlada durante ${km} km. Prioriza terminar con buenas sensaciones.`
+        } ${slot.mode === "treadmill" ? "En cinta: mantén un paso natural y ajusta la inclinación a una sensación equivalente a correr al aire libre." : "En calle: elige una superficie y un recorrido adecuados a tu nivel."}`,
         status: "pending",
       });
     }
-    for (const d of strengthDays) {
+    for (const [strengthIndex, d] of strengthDays.entries()) {
       const date = new Date(weekStart);
       date.setDate(date.getDate() + d);
       if (date > end || isoDay(date) === g.raceDate) continue;
-      const fullBody =
-        strengthDays.length === 1 || strengthDays.indexOf(d) === 0;
-      const hasWeights = p.equipment?.some((item) =>
-        ["Gimnasio", "Mancuernas", "Barra y discos", "Kettlebell"].includes(
-          item,
-        ),
-      );
-      const hasBands = p.equipment?.includes("Bandas elásticas");
+      const fullBody = strengthDays.length === 1 || strengthIndex === 0;
       const exercises = fullBody
-        ? hasWeights
-          ? [
-              "Sentadilla goblet",
-              "Peso muerto rumano",
-              "Zancada atrás",
-              "Elevación de gemelos",
-              "Plancha",
-            ]
-          : [
-              "Sentadilla dividida",
-              "Puente de glúteo a una pierna",
-              "Zancada atrás",
-              "Elevación de gemelos",
-              "Plancha",
-            ]
-        : hasWeights
-          ? [
-              "Peso muerto",
-              "Step-up",
-              "Hip thrust",
-              "Remo con mancuerna",
-              "Pallof press",
-            ]
-          : [
-              "Puente de glúteo a una pierna",
-              "Step-up",
-              "Bisagra a una pierna",
-              hasBands ? "Remo con banda" : "Bird dog",
-              "Plancha lateral",
-            ];
+        ? [
+            "Sentadilla goblet",
+            "Peso muerto rumano",
+            "Zancada atrás",
+            "Elevación de gemelos",
+            "Plancha",
+          ]
+        : [
+            "Peso muerto",
+            "Step-up",
+            "Hip thrust",
+            "Remo con mancuerna",
+            "Pallof press",
+          ];
       const sets =
         phase === "Base"
           ? 3
@@ -343,7 +385,7 @@ function genPlan(p, g, version) {
             ? 2
             : 3;
       sessions.push({
-        id: `w${week}-s${strengthDays.indexOf(d)}`,
+        id: `w${week}-s${d}`,
         date: isoDay(date),
         day: days[d],
         week: week + 1,
@@ -357,7 +399,7 @@ function genPlan(p, g, version) {
           weekPhase === "Descarga"
             ? "RPE 5–6 · ligero"
             : "RPE 6–7 · deja 2–3 repeticiones en reserva",
-        details: `${exercises.map((exercise) => `${exercise} · ${sets} × ${exercise === "Plancha" || exercise === "Pallof press" ? "30–40 s" : "6–10"}`).join("; ")}. Descansa 90–120 s. Equipo: ${p.equipment?.length ? p.equipment.join(", ") : "peso corporal"}. Evita el fallo muscular.`,
+        details: `${exercises.map((exercise) => `${exercise} · ${sets} × ${exercise === "Plancha" || exercise === "Pallof press" ? "30–40 s" : "6–10"}`).join("; ")}. Descansa 90–120 s. Gimnasio: usa una carga que permita mantener la técnica y evita el fallo muscular.`,
         status: "pending",
       });
     }
@@ -381,7 +423,7 @@ function genPlan(p, g, version) {
   const notes = [
     `Progresión gradual según ${Number(p.weeklyKm || 12)} km semanales de referencia; incluye semanas de descarga cada cuatro semanas.`,
     "La intensidad se prescribe con RPE y conversación; revisa la carga si aparece dolor o fatiga persistente.",
-    `La fuerza se mantiene lejos del fallo y utiliza el equipo indicado (${p.equipment?.length ? p.equipment.join(", ") : "peso corporal"}).`,
+    "Las sesiones de fuerza se plantean para gimnasio, lejos del fallo y priorizando una técnica estable.",
   ];
   if (p.limitations?.trim())
     notes.push(
@@ -519,29 +561,31 @@ async function parseActivity(buffer, filename) {
   return { fileHash, activity: data };
 }
 
-function exportData() {
+function exportData(userId) {
   return {
     format: "stride-backup-v1",
     exportedAt: new Date().toISOString(),
-    profile: profile(),
-    goal: goal(),
+    profile: profile(userId),
+    goal: goal(userId),
     plans: db
       .prepare(
-        "SELECT version, created_at AS createdAt, data FROM plans ORDER BY version",
+        "SELECT version, created_at AS createdAt, data FROM plans WHERE user_id=? ORDER BY version",
       )
-      .all()
+      .all(userId)
       .map((r) => ({
         version: r.version,
         createdAt: r.createdAt,
         ...JSON.parse(r.data),
       })),
-    activities: activities().map(({ id, createdAt, ...rest }) => ({
+    activities: activities(userId).map(({ id, createdAt, ...rest }) => ({
       ...rest,
       createdAt,
     })),
     proposals: db
-      .prepare("SELECT status, created_at AS createdAt, data FROM proposals")
-      .all()
+      .prepare(
+        "SELECT status, created_at AS createdAt, data FROM proposals WHERE user_id=?",
+      )
+      .all(userId)
       .map((r) => ({
         status: r.status,
         createdAt: r.createdAt,
@@ -561,43 +605,55 @@ const server = createServer(async (req, res) => {
   try {
     if (pathname === "/api/health" && req.method === "GET")
       return json(res, 200, { ok: true });
-    if (pathname === "/api/session" && req.method === "GET")
+    if (pathname === "/api/session" && req.method === "GET") {
+      const session = sessionUser(req);
       return json(res, 200, {
-        authenticated: sessionFor(req),
-        needsSetup: !db
-          .prepare("SELECT value FROM settings WHERE key='password_hash'")
-          .get(),
+        authenticated: Boolean(session),
+        username: session?.username || null,
+        isAdmin: Boolean(session?.isAdmin),
       });
-    if (pathname === "/api/setup" && req.method === "POST") {
-      if (
-        db.prepare("SELECT value FROM settings WHERE key='password_hash'").get()
-      )
-        return json(res, 409, { error: "La contraseña ya está configurada." });
-      const { password } = await bodyJson(req);
-      if (typeof password !== "string" || password.length < 12)
+    }
+    if (pathname === "/api/register" && req.method === "POST") {
+      const { username, password } = await bodyJson(req);
+      const normalized = typeof username === "string" ? username.trim() : "";
+      if (!/^[a-zA-Z0-9._-]{3,32}$/.test(normalized))
         return json(res, 400, {
-          error: "Usa una contraseña de al menos 12 caracteres.",
+          error:
+            "El login debe tener entre 3 y 32 caracteres: letras, números, punto, guion o guion bajo.",
+        });
+      if (
+        typeof password !== "string" ||
+        password.length < 6 ||
+        password.length > 256
+      )
+        return json(res, 400, {
+          error: "La contraseña debe tener al menos 6 caracteres.",
         });
       const hash = await passwordHash(password);
-      db.prepare(
-        "INSERT OR IGNORE INTO settings(key,value) VALUES('password_hash',?)",
-      ).run(hash);
-      const saved = db
-        .prepare("SELECT value FROM settings WHERE key='password_hash'")
-        .get();
-      if (saved.value !== hash)
-        return json(res, 409, {
-          error:
-            "La contraseña ya fue configurada desde otra sesión. Inicia sesión.",
-        });
-      const token = randomBytes(32).toString("hex");
-      sessions.set(token, Date.now() + sessionTtl);
-      return json(
-        res,
-        200,
-        { ok: true },
-        { "Set-Cookie": secureCookie(token) },
-      );
+      try {
+        const result = db
+          .prepare(
+            "INSERT INTO users(username,password_hash,is_admin,created_at) VALUES(?,?,0,?)",
+          )
+          .run(normalized, hash, new Date().toISOString());
+        const user = {
+          userId: Number(result.lastInsertRowid),
+          username: normalized,
+          isAdmin: false,
+        };
+        const token = randomBytes(32).toString("hex");
+        sessions.set(token, { ...user, expires: Date.now() + sessionTtl });
+        return json(
+          res,
+          201,
+          { ok: true, username: normalized, isAdmin: false },
+          { "Set-Cookie": secureCookie(token) },
+        );
+      } catch (error) {
+        if (String(error.message).includes("UNIQUE"))
+          return json(res, 409, { error: "Ese login ya está en uso." });
+        throw error;
+      }
     }
     if (pathname === "/api/login" && req.method === "POST") {
       const address = req.socket.remoteAddress || "local";
@@ -606,30 +662,47 @@ const server = createServer(async (req, res) => {
         return json(res, 429, {
           error: "Demasiados intentos. Espera unos minutos y vuelve a probar.",
         });
-      const { password } = await bodyJson(req);
+      const { username, password } = await bodyJson(req);
       const saved = db
-        .prepare("SELECT value FROM settings WHERE key='password_hash'")
-        .get();
+        .prepare(
+          "SELECT id, username, password_hash, is_admin FROM users WHERE username=? COLLATE NOCASE",
+        )
+        .get(typeof username === "string" ? username.trim() : "");
       if (
         typeof password !== "string" ||
         password.length > 256 ||
+        (password.length < 6 &&
+          !(
+            typeof username === "string" &&
+            username.trim().toLowerCase() === "admin" &&
+            password === "admin"
+          )) ||
         !saved ||
-        !(await verifyPassword(password, saved.value))
+        !(await verifyPassword(password, saved.password_hash))
       ) {
         const count = (failures?.count || 0) + 1;
         loginFailures.set(address, {
           count,
           blockedUntil: count >= 5 ? Date.now() + 15 * 60 * 1000 : 0,
         });
-        return json(res, 401, { error: "Contraseña incorrecta." });
+        return json(res, 401, { error: "Login o contraseña incorrectos." });
       }
       loginFailures.delete(address);
       const token = randomBytes(32).toString("hex");
-      sessions.set(token, Date.now() + sessionTtl);
+      sessions.set(token, {
+        userId: saved.id,
+        username: saved.username,
+        isAdmin: Boolean(saved.is_admin),
+        expires: Date.now() + sessionTtl,
+      });
       return json(
         res,
         200,
-        { ok: true },
+        {
+          ok: true,
+          username: saved.username,
+          isAdmin: Boolean(saved.is_admin),
+        },
         { "Set-Cookie": secureCookie(token) },
       );
     }
@@ -644,20 +717,91 @@ const server = createServer(async (req, res) => {
       );
     }
     if (pathname.startsWith("/api/")) {
-      if (!sessionFor(req))
+      const session = sessionUser(req);
+      if (!session)
         return json(res, 401, { error: "Inicia sesión para continuar." });
+      const userId = session.userId;
+      if (pathname.startsWith("/api/admin/")) {
+        if (!session.isAdmin)
+          return json(res, 403, {
+            error: "Solo el administrador puede realizar esta acción.",
+          });
+        if (pathname === "/api/admin/users" && req.method === "GET")
+          return json(res, 200, {
+            users: db
+              .prepare(
+                "SELECT id,username,is_admin AS isAdmin,created_at AS createdAt FROM users ORDER BY is_admin DESC,username COLLATE NOCASE",
+              )
+              .all()
+              .map((user) => ({ ...user, isAdmin: Boolean(user.isAdmin) })),
+          });
+        const userRoute = pathname.match(
+          /^\/api\/admin\/users\/(\d+)(?:\/(clear|password))?$/,
+        );
+        if (userRoute) {
+          const targetId = Number(userRoute[1]);
+          const target = db
+            .prepare("SELECT id,username,is_admin FROM users WHERE id=?")
+            .get(targetId);
+          if (!target)
+            return json(res, 404, {
+              error: "No se encontró un usuario administrable.",
+            });
+          if (userRoute[2] === "clear" && req.method === "POST") {
+            db.prepare("DELETE FROM profile WHERE user_id=?").run(targetId);
+            db.prepare("DELETE FROM goal WHERE user_id=?").run(targetId);
+            for (const table of ["plans", "activities", "proposals"])
+              db.prepare(`DELETE FROM ${table} WHERE user_id=?`).run(targetId);
+            return json(res, 200, { ok: true });
+          }
+          if (userRoute[2] === "password" && req.method === "POST") {
+            const { password } = await bodyJson(req);
+            if (
+              typeof password !== "string" ||
+              password.length < 6 ||
+              password.length > 256
+            )
+              return json(res, 400, {
+                error: "La contraseña debe tener al menos 6 caracteres.",
+              });
+            db.prepare("UPDATE users SET password_hash=? WHERE id=?").run(
+              await passwordHash(password),
+              targetId,
+            );
+            const currentToken = cookies(req).stride_session;
+            for (const [token, active] of sessions)
+              if (active.userId === targetId && token !== currentToken)
+                sessions.delete(token);
+            return json(res, 200, { ok: true });
+          }
+          if (!userRoute[2] && req.method === "DELETE") {
+            if (target.is_admin)
+              return json(res, 400, {
+                error:
+                  "La cuenta administradora está protegida y no se puede eliminar.",
+              });
+            db.prepare("DELETE FROM users WHERE id=?").run(targetId);
+            for (const [token, active] of sessions)
+              if (active.userId === targetId) sessions.delete(token);
+            return json(res, 200, { ok: true });
+          }
+        }
+        return json(res, 404, {
+          error: "Ruta de administración no encontrada.",
+        });
+      }
       if (pathname === "/api/state" && req.method === "GET")
         return json(res, 200, {
-          profile: profile(),
-          goal: goal(),
-          plan: latestPlan(),
+          profile: profile(userId),
+          goal: goal(userId),
+          plan: latestPlan(userId),
           planVersions: db
             .prepare(
-              "SELECT version, created_at AS createdAt FROM plans ORDER BY version DESC",
+              "SELECT version, created_at AS createdAt FROM plans WHERE user_id=? ORDER BY version DESC",
             )
-            .all(),
-          activities: activities(),
-          proposal: latestProposal(),
+            .all(userId),
+          activities: activities(userId),
+          proposal: latestProposal(userId),
         });
       if (
         pathname.startsWith("/api/adaptation/") &&
@@ -666,19 +810,37 @@ const server = createServer(async (req, res) => {
       ) {
         const id = Number(pathname.split("/").at(-2));
         db.prepare(
-          "UPDATE proposals SET status='dismissed' WHERE id=? AND status='pending'",
-        ).run(id);
+          "UPDATE proposals SET status='dismissed' WHERE id=? AND user_id=? AND status='pending'",
+        ).run(id, userId);
         return json(res, 200, { ok: true });
       }
       if (pathname === "/api/profile" && req.method === "PUT") {
         const p = await bodyJson(req);
+        const scheduleValid =
+          Array.isArray(p.trainingSchedule) &&
+          p.trainingSchedule.length === 7 &&
+          p.trainingSchedule.every(
+            (day) =>
+              day &&
+              typeof day.strength === "boolean" &&
+              typeof day.treadmill === "boolean" &&
+              typeof day.street === "boolean" &&
+              typeof day.longRun === "boolean" &&
+              (!day.longRun || day.street),
+          );
+        const scheduledDays = scheduleValid
+          ? p.trainingSchedule.filter(
+              (day) => day.strength || day.treadmill || day.street,
+            ).length
+          : 0;
         if (
-          !Array.isArray(p.trainingDays) ||
-          p.trainingDays.length < 2 ||
-          p.trainingDays.some((x) => !Number.isInteger(x) || x < 0 || x > 6)
+          !scheduleValid ||
+          scheduledDays < 2 ||
+          p.trainingSchedule.filter((day) => day.longRun).length > 1
         )
           return json(res, 400, {
-            error: "Selecciona al menos dos días disponibles.",
+            error:
+              "Selecciona sesiones en al menos dos días. La tirada larga solo puede estar marcada en un día con carrera en calle.",
           });
         if (
           !Number.isFinite(Number(p.weeklyKm)) ||
@@ -688,7 +850,7 @@ const server = createServer(async (req, res) => {
           return json(res, 400, {
             error: "Los kilómetros semanales deben estar entre 0 y 250.",
           });
-        saveSingleton("profile", p);
+        saveSingleton("profile", userId, p);
         return json(res, 200, { ok: true });
       }
       if (pathname === "/api/goal" && req.method === "PUT") {
@@ -706,7 +868,7 @@ const server = createServer(async (req, res) => {
           return json(res, 400, {
             error: "El tiempo objetivo debe estar entre 10 y 600 minutos.",
           });
-        saveSingleton("goal", {
+        saveSingleton("goal", userId, {
           ...g,
           distanceKm: Number(g.distanceKm),
           targetTimeMin: g.targetTimeMin ? Number(g.targetTimeMin) : null,
@@ -715,15 +877,17 @@ const server = createServer(async (req, res) => {
       }
       if (pathname === "/api/plans/generate" && req.method === "POST") {
         const version = db
-          .prepare("SELECT COALESCE(MAX(version),0)+1 AS n FROM plans")
-          .get().n;
-        const plan = genPlan(profile(), goal(), version);
+          .prepare(
+            "SELECT COALESCE(MAX(version),0)+1 AS n FROM plans WHERE user_id=?",
+          )
+          .get(userId).n;
+        const plan = genPlan(profile(userId), goal(userId), version);
         db.prepare(
-          "INSERT INTO plans(version,created_at,data) VALUES(?,?,?)",
-        ).run(version, plan.createdAt, JSON.stringify(plan));
+          "INSERT INTO plans(user_id,version,created_at,data) VALUES(?,?,?,?)",
+        ).run(userId, version, plan.createdAt, JSON.stringify(plan));
         db.prepare(
-          "UPDATE proposals SET status='dismissed' WHERE status='pending'",
-        ).run();
+          "UPDATE proposals SET status='dismissed' WHERE user_id=? AND status='pending'",
+        ).run(userId);
         return json(res, 201, { plan });
       }
       if (pathname === "/api/activities/import" && req.method === "POST") {
@@ -732,8 +896,10 @@ const server = createServer(async (req, res) => {
         const parsed = await parseActivity(buffer, filename);
         if (
           db
-            .prepare("SELECT id FROM activities WHERE file_hash=?")
-            .get(parsed.fileHash)
+            .prepare(
+              "SELECT id FROM activities WHERE user_id=? AND file_hash=?",
+            )
+            .get(userId, parsed.fileHash)
         )
           return json(res, 409, {
             error: "Este archivo ya está en tu historial.",
@@ -759,9 +925,10 @@ const server = createServer(async (req, res) => {
         const createdAt = new Date().toISOString();
         const result = db
           .prepare(
-            "INSERT INTO activities(file_hash,created_at,data) VALUES(?,?,?)",
+            "INSERT INTO activities(user_id,file_hash,created_at,data) VALUES(?,?,?,?)",
           )
           .run(
+            userId,
             a.fileHash || null,
             createdAt,
             JSON.stringify({
@@ -776,21 +943,22 @@ const server = createServer(async (req, res) => {
         const { status } = await bodyJson(req);
         if (!["completed", "skipped", "pending"].includes(status))
           return json(res, 400, { error: "Estado de sesión no válido." });
-        const plan = latestPlan();
+        const plan = latestPlan(userId);
         if (!plan) return json(res, 404, { error: "No hay un plan activo." });
         const session = plan.sessions.find((s) => s.id === sessionId);
         if (!session)
           return json(res, 404, { error: "No se encontró la sesión." });
         session.status = status;
         session.updatedAt = new Date().toISOString();
-        db.prepare("UPDATE plans SET data=? WHERE version=?").run(
+        db.prepare("UPDATE plans SET data=? WHERE version=? AND user_id=?").run(
           JSON.stringify(plan),
           plan.version,
+          userId,
         );
         return json(res, 200, { ok: true });
       }
       if (pathname === "/api/adaptation" && req.method === "POST") {
-        const history = activities();
+        const history = activities(userId);
         if (!history.length)
           return json(res, 400, {
             error:
@@ -800,7 +968,7 @@ const server = createServer(async (req, res) => {
         const highEffort = recent.some((a) => Number(a.rpe) >= 9);
         const soreness = recent.some((a) => Boolean(a.soreness));
         const skipped =
-          latestPlan()?.sessions.filter(
+          latestPlan(userId)?.sessions.filter(
             (s) =>
               s.status === "skipped" &&
               s.date >= new Date().toISOString().slice(0, 10),
@@ -811,7 +979,7 @@ const server = createServer(async (req, res) => {
             : skipped
               ? "Hay sesiones futuras marcadas como omitidas. Se propone reorganizar la semana y priorizar recuperación."
               : "El esfuerzo registrado es compatible con el plan actual. Se mantiene la progresión prevista y se revisa de nuevo tras las próximas sesiones.";
-        const plan = latestPlan();
+        const plan = latestPlan(userId);
         const proposedSessions = plan
           ? plan.sessions.map((s) => {
               if (
@@ -863,9 +1031,9 @@ const server = createServer(async (req, res) => {
         };
         const result = db
           .prepare(
-            "INSERT INTO proposals(status,created_at,data) VALUES('pending',?,?)",
+            "INSERT INTO proposals(user_id,status,created_at,data) VALUES(?,'pending',?,?)",
           )
-          .run(new Date().toISOString(), JSON.stringify(proposal));
+          .run(userId, new Date().toISOString(), JSON.stringify(proposal));
         return json(res, 201, {
           proposal: { id: Number(result.lastInsertRowid), ...proposal },
         });
@@ -877,8 +1045,10 @@ const server = createServer(async (req, res) => {
       ) {
         const id = Number(pathname.split("/").at(-2));
         const proposalRow = db
-          .prepare("SELECT * FROM proposals WHERE id=? AND status='pending'")
-          .get(id);
+          .prepare(
+            "SELECT * FROM proposals WHERE id=? AND user_id=? AND status='pending'",
+          )
+          .get(id, userId);
         if (!proposalRow)
           return json(res, 404, {
             error: "La propuesta ya no está disponible.",
@@ -888,15 +1058,17 @@ const server = createServer(async (req, res) => {
           return json(res, 400, {
             error: "No hay un plan que se pueda actualizar.",
           });
-        const latest = latestPlan();
+        const latest = latestPlan(userId);
         if (latest?.version !== proposal.planVersion)
           return json(res, 409, {
             error:
               "El plan ha cambiado desde que se creó la propuesta. Genera una nueva reevaluación.",
           });
         const version = db
-          .prepare("SELECT COALESCE(MAX(version),0)+1 AS n FROM plans")
-          .get().n;
+          .prepare(
+            "SELECT COALESCE(MAX(version),0)+1 AS n FROM plans WHERE user_id=?",
+          )
+          .get(userId).n;
         const revised = {
           ...proposal.plan,
           version,
@@ -905,13 +1077,15 @@ const server = createServer(async (req, res) => {
           changeReason: proposal.reason,
         };
         db.prepare(
-          "INSERT INTO plans(version,created_at,data) VALUES(?,?,?)",
-        ).run(version, revised.createdAt, JSON.stringify(revised));
-        db.prepare("UPDATE proposals SET status='accepted' WHERE id=?").run(id);
+          "INSERT INTO plans(user_id,version,created_at,data) VALUES(?,?,?,?)",
+        ).run(userId, version, revised.createdAt, JSON.stringify(revised));
+        db.prepare(
+          "UPDATE proposals SET status='accepted' WHERE id=? AND user_id=?",
+        ).run(id, userId);
         return json(res, 200, { plan: revised });
       }
       if (pathname === "/api/export" && req.method === "GET")
-        return json(res, 200, exportData(), {
+        return json(res, 200, exportData(userId), {
           "Content-Disposition": 'attachment; filename="stride-backup.json"',
         });
       if (pathname === "/api/import-backup" && req.method === "POST") {
@@ -927,16 +1101,16 @@ const server = createServer(async (req, res) => {
         const tx = db.prepare("BEGIN IMMEDIATE");
         tx.run();
         try {
-          saveSingleton("profile", backup.profile || {});
-          if (backup.goal) saveSingleton("goal", backup.goal);
-          else db.prepare("DELETE FROM goal WHERE id=1").run();
-          db.exec(
-            "DELETE FROM plans; DELETE FROM activities; DELETE FROM proposals;",
-          );
+          saveSingleton("profile", userId, backup.profile || {});
+          if (backup.goal) saveSingleton("goal", userId, backup.goal);
+          else db.prepare("DELETE FROM goal WHERE user_id=?").run(userId);
+          for (const table of ["plans", "activities", "proposals"])
+            db.prepare(`DELETE FROM ${table} WHERE user_id=?`).run(userId);
           for (const plan of backup.plans)
             db.prepare(
-              "INSERT INTO plans(version,created_at,data) VALUES(?,?,?)",
+              "INSERT INTO plans(user_id,version,created_at,data) VALUES(?,?,?,?)",
             ).run(
+              userId,
               Number(plan.version),
               plan.createdAt || new Date().toISOString(),
               JSON.stringify(plan),
@@ -944,8 +1118,9 @@ const server = createServer(async (req, res) => {
           for (const activity of backup.activities) {
             const { createdAt, ...data } = activity;
             db.prepare(
-              "INSERT OR IGNORE INTO activities(file_hash,created_at,data) VALUES(?,?,?)",
+              "INSERT OR IGNORE INTO activities(user_id,file_hash,created_at,data) VALUES(?,?,?,?)",
             ).run(
+              userId,
               data.fileHash || null,
               createdAt || new Date().toISOString(),
               JSON.stringify(data),
@@ -954,8 +1129,9 @@ const server = createServer(async (req, res) => {
           for (const proposal of backup.proposals || []) {
             const { createdAt, status, ...data } = proposal;
             db.prepare(
-              "INSERT INTO proposals(status,created_at,data) VALUES(?,?,?)",
+              "INSERT INTO proposals(user_id,status,created_at,data) VALUES(?,?,?,?)",
             ).run(
+              userId,
               status || "accepted",
               createdAt || new Date().toISOString(),
               JSON.stringify(data),

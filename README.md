@@ -18,7 +18,7 @@ Abre la dirección local que muestre Vite, normalmente `http://localhost:5173`. 
 
 El acceso local usa HTTP y no configura TLS. Úsalo solo en una red privada de confianza y no publiques ni redirijas el puerto a Internet.
 
-En el primer acceso, crea una contraseña de al menos 12 caracteres. La contraseña se almacena como hash scrypt en la base local. Las sesiones se invalidan al reiniciar el servidor.
+El acceso inicial es `admin` con contraseña `admin`. Desde la pantalla de acceso puedes entrar con esa cuenta o crear usuarios nuevos; cada usuario tiene un login propio y una contraseña de al menos 6 caracteres. Las contraseñas se almacenan como hash scrypt en la base local y los perfiles, objetivos, planes y actividades quedan separados por cuenta. El administrador puede borrar los datos de una cuenta, restablecer su contraseña o eliminarla por completo desde **Administración**. La cuenta admin está protegida contra eliminación. Las sesiones se invalidan al reiniciar el servidor.
 
 ## Ejecutar una compilación local
 

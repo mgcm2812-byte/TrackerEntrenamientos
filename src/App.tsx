@@ -68,10 +68,15 @@ type Profile = {
   weeklyKm: string;
   longestRunKm: string;
   recent5kMin: string;
-  trainingDays: number[];
-  equipment: string[];
+  trainingSchedule: DayTraining[];
   limitations: string;
   preferences: string;
+};
+type DayTraining = {
+  strength: boolean;
+  treadmill: boolean;
+  street: boolean;
+  longRun: boolean;
 };
 type Goal = {
   distanceKm: number;
@@ -107,7 +112,7 @@ type AppData = {
     plan: Plan;
   };
 };
-type View = "overview" | "plan" | "history" | "profile" | "settings";
+type View = "overview" | "plan" | "history" | "profile" | "settings" | "admin";
 
 const dayNames = [
   "Lunes",
@@ -119,6 +124,12 @@ const dayNames = [
   "Domingo",
 ];
 const dayShort = ["L", "M", "X", "J", "V", "S", "D"];
+const emptyDayTraining: DayTraining = {
+  strength: false,
+  treadmill: false,
+  street: false,
+  longRun: false,
+};
 const defaultProfile: Profile = {
   name: "",
   age: "",
@@ -128,11 +139,87 @@ const defaultProfile: Profile = {
   weeklyKm: "12",
   longestRunKm: "6",
   recent5kMin: "",
-  trainingDays: [0, 2, 4, 5],
-  equipment: ["Mancuernas", "Gimnasio"],
+  trainingSchedule: [
+    { ...emptyDayTraining, street: true },
+    { ...emptyDayTraining },
+    { ...emptyDayTraining, strength: true },
+    { ...emptyDayTraining },
+    { ...emptyDayTraining, strength: true },
+    { ...emptyDayTraining },
+    { ...emptyDayTraining, street: true, longRun: true },
+  ],
   limitations: "",
   preferences: "",
 };
+function normalizedProfile(value: Profile | null): Profile {
+  if (!value) return { ...defaultProfile };
+  const legacy = value as Profile & {
+    trainingDays?: number[];
+    equipment?: string[];
+  };
+  const {
+    trainingDays: _trainingDays,
+    equipment: _equipment,
+    ...storedProfile
+  } = legacy;
+  if (Array.isArray(legacy.trainingSchedule))
+    return {
+      ...defaultProfile,
+      ...storedProfile,
+      trainingSchedule: (() => {
+        let longRunAssigned = false;
+        return Array.from({ length: 7 }, (_, day) => {
+          const stored = legacy.trainingSchedule[day] || emptyDayTraining;
+          const longRun = Boolean(
+            stored.longRun && stored.street && !longRunAssigned,
+          );
+          if (longRun) longRunAssigned = true;
+          return {
+            strength: Boolean(stored.strength),
+            treadmill: Boolean(stored.treadmill),
+            street: Boolean(stored.street),
+            longRun,
+          };
+        });
+      })(),
+    };
+
+  // Preserve the intent of profiles created before per-day session selection existed.
+  const oldDays = Array.isArray(legacy.trainingDays)
+    ? legacy.trainingDays
+        .map(Number)
+        .filter((day) => day >= 0 && day < 7)
+        .sort((a, b) => a - b)
+    : [];
+  const oldRuns =
+    oldDays.length >= 5
+      ? [oldDays[0], oldDays[Math.floor(oldDays.length / 2)], oldDays.at(-1)!]
+      : oldDays.length >= 3
+        ? [oldDays[0], oldDays[Math.floor(oldDays.length / 2)]]
+        : oldDays.slice(0, 1);
+  const oldStrength =
+    oldDays.length >= 5
+      ? [oldDays[1], oldDays[oldDays.length - 2]]
+      : oldDays.length >= 4
+        ? [oldDays[1], oldDays.at(-1)!]
+        : oldDays.length
+          ? [oldDays.at(-1)!]
+          : [];
+  const trainingSchedule = Array.from({ length: 7 }, (_, day) => ({
+    ...emptyDayTraining,
+    street: oldRuns.includes(day),
+    longRun: oldRuns.length > 0 && oldRuns.at(-1) === day,
+    strength: oldStrength.includes(day),
+  }));
+  return { ...defaultProfile, ...storedProfile, trainingSchedule };
+}
+function activeTrainingDays(schedule: DayTraining[]) {
+  return schedule.filter((day) => day.strength || day.treadmill || day.street)
+    .length;
+}
+function hasRunningSession(schedule: DayTraining[]) {
+  return schedule.some((day) => day.treadmill || day.street);
+}
 const emptyState: AppData = {
   profile: null,
   goal: null,
@@ -161,6 +248,10 @@ const viewMeta: Record<View, { title: string; subtitle: string }> = {
   settings: {
     title: "Ajustes y datos",
     subtitle: "Mantén tu historial local seguro y portable.",
+  },
+  admin: {
+    title: "Administración",
+    subtitle: "Gestiona las cuentas registradas en Stride.",
   },
 };
 
@@ -228,7 +319,10 @@ function firstName(name?: string) {
 
 export default function App() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
-  const [needsSetup, setNeedsSetup] = useState(false);
+  const [account, setAccount] = useState<{
+    username: string;
+    isAdmin: boolean;
+  } | null>(null);
   const [data, setData] = useState<AppData>(emptyState);
   const [view, setView] = useState<View>("overview");
   const [busy, setBusy] = useState(false);
@@ -241,11 +335,18 @@ export default function App() {
     setData(next);
   }
   useEffect(() => {
-    api<{ authenticated: boolean; needsSetup: boolean }>("/api/session")
+    api<{ authenticated: boolean; username: string | null; isAdmin: boolean }>(
+      "/api/session",
+    )
       .then(async (session) => {
         setAuthenticated(session.authenticated);
-        setNeedsSetup(session.needsSetup);
-        if (session.authenticated) await reload();
+        setAccount(
+          session.username
+            ? { username: session.username, isAdmin: session.isAdmin }
+            : null,
+        );
+        setView(session.isAdmin ? "admin" : "overview");
+        if (session.authenticated && !session.isAdmin) await reload();
       })
       .catch((e) => {
         setError(e.message);
@@ -278,7 +379,11 @@ export default function App() {
   async function signOut() {
     await api("/api/logout", { method: "POST", body: "{}" });
     setAuthenticated(false);
+    setAccount(null);
     setData(emptyState);
+    setView("overview");
+    setNotice("");
+    setError("");
   }
   if (authenticated === null)
     return (
@@ -290,13 +395,28 @@ export default function App() {
   if (!authenticated)
     return (
       <LoginScreen
-        needsSetup={needsSetup}
         initialError={error}
-        onReady={() => {
+        onReady={(user) => {
           setAuthenticated(true);
-          setNeedsSetup(false);
-          void reload();
+          setAccount(user);
+          setView(user.isAdmin ? "admin" : "overview");
+          if (user.isAdmin) setData(emptyState);
+          else void reload();
         }}
+      />
+    );
+
+  if (account?.isAdmin)
+    return (
+      <AdminWorkspace
+        username={account.username}
+        notice={notice}
+        error={error}
+        busy={busy}
+        clearNotice={() => setNotice("")}
+        clearError={() => setError("")}
+        runAction={action}
+        signOut={() => void signOut()}
       />
     );
 
@@ -388,8 +508,14 @@ export default function App() {
               {(data.profile?.name || "A").trim().slice(0, 1).toUpperCase()}
             </div>
             <div className="account-copy">
-              <strong>{data.profile?.name || "Tu perfil"}</strong>
-              <span>Atleta personal</span>
+              <strong>
+                {data.profile?.name || account?.username || "Tu perfil"}
+              </strong>
+              <span>
+                {account?.isAdmin
+                  ? "Administrador"
+                  : `Usuario · ${account?.username || ""}`}
+              </span>
             </div>
             <button
               className="icon-button logout-button"
@@ -427,7 +553,10 @@ export default function App() {
               onClick={() => navigate("profile")}
               aria-label="Abrir perfil"
             >
-              {(data.profile?.name || "A").trim().slice(0, 1).toUpperCase()}
+              {(data.profile?.name || account?.username || "A")
+                .trim()
+                .slice(0, 1)
+                .toUpperCase()}
             </button>
           </div>
         </header>
@@ -521,6 +650,119 @@ export default function App() {
   );
 }
 
+function AdminWorkspace({
+  username,
+  notice,
+  error,
+  busy,
+  clearNotice,
+  clearError,
+  runAction,
+  signOut,
+}: {
+  username: string;
+  notice: string;
+  error: string;
+  busy: boolean;
+  clearNotice: () => void;
+  clearError: () => void;
+  runAction: <T>(fn: () => Promise<T>, success?: string) => Promise<T | null>;
+  signOut: () => void;
+}) {
+  return (
+    <div className="app-shell admin-shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="brand-mark">S</div>
+          <div>
+            <span className="brand-name">stride</span>
+            <span className="brand-label">ADMINISTRACIÓN</span>
+          </div>
+        </div>
+        <div className="sidebar-caption">GESTIÓN</div>
+        <nav className="nav-list" aria-label="Administración">
+          <NavButton
+            active
+            icon={<ShieldCheck size={18} />}
+            label="Usuarios"
+            onClick={() => {}}
+          />
+        </nav>
+        <div className="sidebar-bottom">
+          <div className="account-row">
+            <div className="avatar">{username.slice(0, 1).toUpperCase()}</div>
+            <div className="account-copy">
+              <strong>{username}</strong>
+              <span>Administrador</span>
+            </div>
+            <button
+              className="icon-button logout-button"
+              title="Cerrar sesión"
+              onClick={signOut}
+            >
+              <LogOut size={16} />
+            </button>
+          </div>
+        </div>
+      </aside>
+      <main className="main-area">
+        <header className="topbar">
+          <div className="crumb">
+            <span>Stride</span>
+            <span className="crumb-slash">/</span>
+            <strong>Administración</strong>
+          </div>
+          <span className="admin-role-pill">
+            <ShieldCheck size={14} /> Administrador
+          </span>
+          <button
+            className="button button-outline admin-logout"
+            onClick={signOut}
+          >
+            <LogOut size={14} /> Cerrar sesión
+          </button>
+        </header>
+        <div className="page-content">
+          <div className="page-heading">
+            <div>
+              <div className="eyebrow">MANTENIMIENTO DE CUENTAS</div>
+              <h1>Administración de usuarios</h1>
+              <p>Gestiona accesos y datos de los usuarios de Stride.</p>
+            </div>
+          </div>
+          {notice && (
+            <div className="toast toast-success">
+              <CheckCircle2 size={17} />
+              {notice}
+              <button onClick={clearNotice} aria-label="Cerrar">
+                <X size={16} />
+              </button>
+            </div>
+          )}
+          {error && (
+            <div className="toast toast-error">
+              <CircleHelp size={17} />
+              {error}
+              <button onClick={clearError} aria-label="Cerrar">
+                <X size={16} />
+              </button>
+            </div>
+          )}
+          <AdminView runAction={runAction} />
+          <footer className="page-footer">
+            <span>Gestión de cuentas y privacidad de datos.</span>
+            <span>
+              <ShieldCheck size={13} />
+              Acceso restringido al administrador
+            </span>
+          </footer>
+          {busy && <span className="admin-busy-indicator">Guardando…</span>}
+        </div>
+      </main>
+    </div>
+  );
+}
+
 function NavButton({
   active,
   icon,
@@ -546,14 +788,14 @@ function NavButton({
   );
 }
 function LoginScreen({
-  needsSetup,
   initialError = "",
   onReady,
 }: {
-  needsSetup: boolean;
   initialError?: string;
-  onReady: () => void;
+  onReady: (user: { username: string; isAdmin: boolean }) => void;
 }) {
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState(initialError);
@@ -561,17 +803,20 @@ function LoginScreen({
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setError("");
-    if (needsSetup && password !== confirm) {
+    if (mode === "register" && password !== confirm) {
       setError("Las contraseñas no coinciden.");
       return;
     }
     setBusy(true);
     try {
-      await api(needsSetup ? "/api/setup" : "/api/login", {
-        method: "POST",
-        body: JSON.stringify({ password }),
-      });
-      onReady();
+      const user = await api<{ username: string; isAdmin: boolean }>(
+        mode === "register" ? "/api/register" : "/api/login",
+        {
+          method: "POST",
+          body: JSON.stringify({ username, password }),
+        },
+      );
+      onReady(user);
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo iniciar sesión.");
     } finally {
@@ -616,36 +861,56 @@ function LoginScreen({
             <LockKeyhole size={21} />
           </div>
           <span className="eyebrow">
-            {needsSetup ? "TU ESPACIO PERSONAL" : "HOLA DE NUEVO"}
+            {mode === "register" ? "NUEVA CUENTA" : "HOLA DE NUEVO"}
           </span>
-          <h1>{needsSetup ? "Empieza por aquí." : "Qué bueno verte."}</h1>
+          <h1>
+            {mode === "register" ? "Crea tu cuenta." : "Qué bueno verte."}
+          </h1>
           <p>
-            {needsSetup
-              ? "Crea una contraseña para mantener tu entrenamiento privado en tu red."
+            {mode === "register"
+              ? "Elige un login y una contraseña para guardar tu entrenamiento."
               : "Entra para seguir construyendo tu progreso."}
           </p>
           <form onSubmit={(e) => void submit(e)} className="auth-form">
             <label>
+              Login
+              <input
+                type="text"
+                autoComplete="username"
+                minLength={3}
+                maxLength={32}
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Tu nombre de usuario"
+                required
+              />
+            </label>
+            <label>
               Contraseña
               <input
                 type="password"
-                autoComplete={needsSetup ? "new-password" : "current-password"}
-                minLength={needsSetup ? 12 : undefined}
+                autoComplete={
+                  mode === "register" ? "new-password" : "current-password"
+                }
+                minLength={mode === "register" ? 6 : undefined}
+                maxLength={256}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder={
-                  needsSetup ? "Al menos 12 caracteres" : "Tu contraseña"
+                  mode === "register"
+                    ? "Al menos 6 caracteres"
+                    : "Tu contraseña"
                 }
                 required
               />
             </label>
-            {needsSetup && (
+            {mode === "register" && (
               <label>
                 Repite la contraseña
                 <input
                   type="password"
                   autoComplete="new-password"
-                  minLength={12}
+                  minLength={6}
                   value={confirm}
                   onChange={(e) => setConfirm(e.target.value)}
                   placeholder="Confirma tu contraseña"
@@ -660,12 +925,26 @@ function LoginScreen({
             >
               {busy
                 ? "Un momento…"
-                : needsSetup
-                  ? "Crear mi espacio"
+                : mode === "register"
+                  ? "Crear usuario"
                   : "Entrar"}
               <ArrowRight size={16} />
             </button>
           </form>
+          <button
+            type="button"
+            className="auth-mode-toggle"
+            onClick={() => {
+              setMode(mode === "login" ? "register" : "login");
+              setError("");
+              setPassword("");
+              setConfirm("");
+            }}
+          >
+            {mode === "login"
+              ? "¿Aún no tienes usuario? Crear una cuenta"
+              : "Ya tengo usuario · Iniciar sesión"}
+          </button>
           <div className="auth-privacy">
             <ShieldCheck size={15} />
             <span>Acceso protegido · Sin cuenta externa</span>
@@ -1146,7 +1425,7 @@ function WeekPreview({ sessions }: { sessions: Session[] }) {
   return (
     <div className="week-preview">
       {days.map((date, index) => {
-        const item = sessions.find((s) => s.date === date);
+        const items = sessions.filter((s) => s.date === date);
         const today = date === todayISO();
         return (
           <div
@@ -1157,12 +1436,13 @@ function WeekPreview({ sessions }: { sessions: Session[] }) {
             <span className="week-day-number">
               {new Date(`${date}T12:00:00`).getDate()}
             </span>
-            {item ? (
+            {items.length ? (
               <span
-                className={`week-day-marker marker-${item.type}`}
-                title={item.title}
+                className={`week-day-marker marker-${items[0].type}`}
+                title={items.map((item) => item.title).join(" · ")}
               >
-                <SessionIcon type={item.type} />
+                <SessionIcon type={items[0].type} />
+                {items.length > 1 && <small>{items.length}</small>}
               </span>
             ) : (
               <span className="week-day-rest" />
@@ -1172,9 +1452,7 @@ function WeekPreview({ sessions }: { sessions: Session[] }) {
       })}
       <div className="week-preview-list">
         {sessions.length ? (
-          sessions
-            .slice(0, 3)
-            .map((s) => <SessionPill key={s.id} session={s} compact />)
+          sessions.map((s) => <SessionPill key={s.id} session={s} compact />)
         ) : (
           <div className="rest-message">
             <span />
@@ -1340,7 +1618,8 @@ function PlanView({
         </div>
         <div className="schedule-strip">
           {selectedDates.map((date, index) => {
-            const session = sessions.find((s) => s.date === date);
+            const daySessions = sessions.filter((s) => s.date === date);
+            const session = daySessions[0];
             const selected = date === todayISO();
             return (
               <button
@@ -1355,9 +1634,11 @@ function PlanView({
                 <strong>{new Date(`${date}T12:00:00`).getDate()}</strong>
                 <i>
                   {session
-                    ? session.type === "strength"
-                      ? "FUERZA"
-                      : "CARRERA"
+                    ? daySessions.length > 1
+                      ? `${daySessions.length} SESIONES`
+                      : session.type === "strength"
+                        ? "FUERZA"
+                        : "CARRERA"
                     : "DESCANSO"}
                 </i>
               </button>
@@ -1366,7 +1647,7 @@ function PlanView({
         </div>
         <div className="schedule-list">
           {selectedDates.map((date) => {
-            const item = sessions.find((s) => s.date === date);
+            const items = sessions.filter((s) => s.date === date);
             return (
               <div
                 id={`date-${date}`}
@@ -1379,27 +1660,30 @@ function PlanView({
                     {prettyDate(date, { day: "numeric", month: "long" })}
                   </span>
                 </div>
-                {item ? (
-                  <SessionPill
-                    session={item}
-                    onStatus={(status) =>
-                      void runAction(
-                        async () => {
-                          await api(
-                            `/api/sessions/${encodeURIComponent(item.id)}`,
-                            {
-                              method: "PATCH",
-                              body: JSON.stringify({ status }),
-                            },
-                          );
-                          await refresh();
-                        },
-                        status === "completed"
-                          ? "Sesión completada. ¡Buen trabajo!"
-                          : "Sesión registrada como omitida.",
-                      )
-                    }
-                  />
+                {items.length ? (
+                  items.map((item) => (
+                    <SessionPill
+                      key={item.id}
+                      session={item}
+                      onStatus={(status) =>
+                        void runAction(
+                          async () => {
+                            await api(
+                              `/api/sessions/${encodeURIComponent(item.id)}`,
+                              {
+                                method: "PATCH",
+                                body: JSON.stringify({ status }),
+                              },
+                            );
+                            await refresh();
+                          },
+                          status === "completed"
+                            ? "Sesión completada. ¡Buen trabajo!"
+                            : "Sesión registrada como omitida.",
+                        )
+                      }
+                    />
+                  ))
                 ) : (
                   <div className="rest-day-card">
                     <div className="rest-mark" />
@@ -1789,15 +2073,14 @@ function ProfileView({
   runAction: <T>(fn: () => Promise<T>, success?: string) => Promise<T | null>;
   refresh: () => Promise<void>;
 }) {
-  const initial = current || defaultProfile;
-  const [form, setForm] = useState<Profile>({ ...defaultProfile, ...initial });
+  const [form, setForm] = useState<Profile>(() => normalizedProfile(current));
   const [goalForm, setGoalForm] = useState<Goal>({
     distanceKm: 5,
     raceDate: "",
     targetTimeMin: "",
   });
   useEffect(() => {
-    setForm({ ...defaultProfile, ...(current || {}) });
+    setForm(normalizedProfile(current));
   }, [current]);
   useEffect(() => {
     if (goal) setGoalForm({ ...goal, targetTimeMin: goal.targetTimeMin ?? "" });
@@ -1835,20 +2118,28 @@ function ProfileView({
     window.addEventListener("open-profile", handler);
     return () => window.removeEventListener("open-profile", handler);
   }, []);
-  const toggleDay = (day: number) =>
-    setForm((f) => ({
-      ...f,
-      trainingDays: f.trainingDays.includes(day)
-        ? f.trainingDays.filter((d) => d !== day)
-        : [...f.trainingDays, day].sort(),
-    }));
-  const toggleEquipment = (equipment: string) =>
-    setForm((f) => ({
-      ...f,
-      equipment: f.equipment.includes(equipment)
-        ? f.equipment.filter((e) => e !== equipment)
-        : [...f.equipment, equipment],
-    }));
+  const toggleTraining = (dayIndex: number, field: keyof DayTraining) =>
+    setForm((currentForm) => {
+      const trainingSchedule = currentForm.trainingSchedule.map(
+        (day, index) => {
+          if (index !== dayIndex)
+            return field === "longRun" && !day.street
+              ? { ...day, longRun: false }
+              : day;
+          const next = { ...day, [field]: !day[field] };
+          if (field === "street" && !next.street) next.longRun = false;
+          return next;
+        },
+      );
+      if (
+        field === "longRun" &&
+        !currentForm.trainingSchedule[dayIndex].longRun
+      )
+        trainingSchedule.forEach((day, index) => {
+          if (index !== dayIndex) day.longRun = false;
+        });
+      return { ...currentForm, trainingSchedule };
+    });
   const update = (key: keyof Profile, value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
   return (
@@ -1986,46 +2277,87 @@ function ProfileView({
             </Field>
           </div>
           <div className="subsection-label">
-            ¿Qué días tienes para entrenar? <span>Elige al menos dos</span>
+            Plan semanal <span>Elige al menos dos días de entrenamiento</span>
           </div>
-          <div className="day-selector">
-            {dayNames.map((day, index) => (
-              <button
-                type="button"
-                key={day}
-                className={form.trainingDays.includes(index) ? "chosen" : ""}
-                onClick={() => toggleDay(index)}
-              >
-                <span>{dayShort[index]}</span>
-                <small>{day}</small>
-                {form.trainingDays.includes(index) && (
-                  <i>
-                    <Check size={10} />
-                  </i>
-                )}
-              </button>
-            ))}
-          </div>
-          <div className="subsection-label">¿Con qué equipo cuentas?</div>
-          <div className="chip-group">
-            {[
-              "Gimnasio",
-              "Mancuernas",
-              "Barra y discos",
-              "Bandas elásticas",
-              "Peso corporal",
-              "Kettlebell",
-            ].map((item) => (
-              <button
-                type="button"
-                key={item}
-                className={`choice-chip ${form.equipment.includes(item) ? "selected" : ""}`}
-                onClick={() => toggleEquipment(item)}
-              >
-                {form.equipment.includes(item) && <Check size={12} />}
-                {item}
-              </button>
-            ))}
+          <p className="schedule-helper">
+            El trabajo de fuerza se plantea en gimnasio. Puedes combinar fuerza
+            y carrera en un mismo día. Para cada sesión de carrera, elige cinta
+            o calle. Si activas ambas, se crearán dos sesiones de carrera ese
+            día.
+          </p>
+          <div className="weekly-training-grid">
+            {dayNames.map((day, index) => {
+              const selection =
+                form.trainingSchedule[index] || emptyDayTraining;
+              const active =
+                selection.strength || selection.treadmill || selection.street;
+              const options: {
+                field: keyof DayTraining;
+                label: string;
+                icon: React.ReactNode;
+              }[] = [
+                {
+                  field: "strength",
+                  label: "Fuerza",
+                  icon: <Dumbbell size={15} />,
+                },
+                {
+                  field: "treadmill",
+                  label: "Carrera en cinta",
+                  icon: <Activity size={15} />,
+                },
+                {
+                  field: "street",
+                  label: "Carrera en calle",
+                  icon: <Footprints size={15} />,
+                },
+              ];
+              return (
+                <section
+                  className={`training-day-card ${active ? "is-active" : ""}`}
+                  key={day}
+                >
+                  <header className="training-day-heading">
+                    <span className="training-day-initial">
+                      {dayShort[index]}
+                    </span>
+                    <strong>{day}</strong>
+                    <small>{active ? "Entrenamiento" : "Descanso"}</small>
+                  </header>
+                  <div className="training-day-options">
+                    {options.map(({ field, label, icon }) => (
+                      <label
+                        className={`training-option ${selection[field] ? "is-selected" : ""}`}
+                        key={field}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selection[field]}
+                          onChange={() => toggleTraining(index, field)}
+                        />
+                        {icon}
+                        <span>{label}</span>
+                        <i>{selection[field] && <Check size={12} />}</i>
+                      </label>
+                    ))}
+                    {selection.street && (
+                      <label
+                        className={`training-option long-run-option ${selection.longRun ? "is-selected" : ""}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selection.longRun}
+                          onChange={() => toggleTraining(index, "longRun")}
+                        />
+                        <TrendingUp size={15} />
+                        <span>Tirada larga</span>
+                        <i>{selection.longRun && <Check size={12} />}</i>
+                      </label>
+                    )}
+                  </div>
+                </section>
+              );
+            })}
           </div>
           <div className="form-grid two-col">
             <Field
@@ -2143,13 +2475,21 @@ function ProfileView({
           <button
             className="button button-primary button-full"
             disabled={
-              busy || !goalForm.raceDate || form.trainingDays.length < 2
+              busy ||
+              !goalForm.raceDate ||
+              activeTrainingDays(form.trainingSchedule) < 2 ||
+              !hasRunningSession(form.trainingSchedule)
             }
             onClick={() => void generate()}
           >
             {busy ? "Preparando plan…" : dataPlanLabel(current)}
             <ArrowRight size={16} />
           </button>
+          {!hasRunningSession(form.trainingSchedule) && (
+            <p className="generate-inline-hint">
+              Marca al menos una sesión de carrera en cinta o en calle.
+            </p>
+          )}
           <div className="generate-checks">
             <span>
               <CheckCircle2 size={14} />
@@ -2178,6 +2518,162 @@ function ProfileView({
 }
 function dataPlanLabel(current: Profile | null) {
   return current ? "Generar nuevo plan" : "Generar mi primer plan";
+}
+
+type ManagedUser = {
+  id: number;
+  username: string;
+  isAdmin: boolean;
+  createdAt: string;
+};
+
+function AdminView({
+  runAction,
+}: {
+  runAction: <T>(fn: () => Promise<T>, success?: string) => Promise<T | null>;
+}) {
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [passwords, setPasswords] = useState<Record<number, string>>({});
+  async function refreshUsers() {
+    const result = await api<{ users: ManagedUser[] }>("/api/admin/users");
+    setUsers(result.users);
+  }
+  useEffect(() => {
+    void refreshUsers().catch(() => setUsers([]));
+  }, []);
+  async function clearUser(user: ManagedUser) {
+    if (
+      !window.confirm(
+        `¿Borrar el perfil, objetivo, planes y actividades de ${user.username}? La cuenta seguirá existiendo.`,
+      )
+    )
+      return;
+    await runAction(async () => {
+      await api(`/api/admin/users/${user.id}/clear`, {
+        method: "POST",
+        body: "{}",
+      });
+    }, `Datos de ${user.username} borrados.`);
+  }
+  async function deleteUser(user: ManagedUser) {
+    if (
+      !window.confirm(
+        `¿Eliminar por completo la cuenta ${user.username} y todos sus datos? Esta acción no se puede deshacer.`,
+      )
+    )
+      return;
+    const result = await runAction(async () => {
+      await api(`/api/admin/users/${user.id}`, { method: "DELETE" });
+      await refreshUsers();
+    }, `Usuario ${user.username} eliminado.`);
+    return result;
+  }
+  async function resetPassword(user: ManagedUser) {
+    const password = passwords[user.id] || "";
+    if (password.length < 6) return;
+    const result = await runAction(async () => {
+      await api(`/api/admin/users/${user.id}/password`, {
+        method: "POST",
+        body: JSON.stringify({ password }),
+      });
+      setPasswords((all) => ({ ...all, [user.id]: "" }));
+    }, `Contraseña de ${user.username} actualizada.`);
+    return result;
+  }
+  return (
+    <div className="settings-layout">
+      <section className="panel settings-intro">
+        <div className="settings-shield">
+          <ShieldCheck size={23} />
+        </div>
+        <div>
+          <div className="eyebrow">CONTROL DE CUENTAS</div>
+          <h2>Administración de usuarios</h2>
+          <p>
+            Elimina cuentas, borra sus datos sin quitar el acceso o restablece
+            la contraseña. Cada persona solo puede consultar su propio
+            historial.
+          </p>
+        </div>
+      </section>
+      <section className="panel admin-users-panel">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">CUENTAS REGISTRADAS</span>
+            <h3>
+              {users.length} {users.length === 1 ? "usuario" : "usuarios"}
+            </h3>
+          </div>
+          <button
+            className="button button-outline"
+            onClick={() => void refreshUsers()}
+          >
+            Actualizar <RefreshCw size={14} />
+          </button>
+        </div>
+        <div className="admin-users-list">
+          {users.map((user) => (
+            <article className="admin-user-card" key={user.id}>
+              <div className="admin-user-identity">
+                <div className="avatar">
+                  {user.username.slice(0, 1).toUpperCase()}
+                </div>
+                <div>
+                  <strong>{user.username}</strong>
+                  <span>
+                    {user.isAdmin
+                      ? "Administrador"
+                      : `Cuenta creada · ${prettyDate(user.createdAt.slice(0, 10), { day: "numeric", month: "short", year: "numeric" })}`}
+                  </span>
+                </div>
+              </div>
+              <>
+                <div className="admin-reset-row">
+                  <input
+                    aria-label={`Nueva contraseña para ${user.username}`}
+                    type="password"
+                    minLength={6}
+                    maxLength={256}
+                    placeholder="Nueva contraseña (mín. 6)"
+                    value={passwords[user.id] || ""}
+                    onChange={(e) =>
+                      setPasswords((all) => ({
+                        ...all,
+                        [user.id]: e.target.value,
+                      }))
+                    }
+                  />
+                  <button
+                    className="button button-outline"
+                    disabled={(passwords[user.id] || "").length < 6}
+                    onClick={() => void resetPassword(user)}
+                  >
+                    Restablecer
+                  </button>
+                </div>
+                <div className="admin-user-actions">
+                  <button
+                    className="button button-outline"
+                    onClick={() => void clearUser(user)}
+                  >
+                    Borrar sus datos
+                  </button>
+                  {!user.isAdmin && (
+                    <button
+                      className="button button-danger"
+                      onClick={() => void deleteUser(user)}
+                    >
+                      Eliminar usuario
+                    </button>
+                  )}
+                </div>
+              </>
+            </article>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function SettingsView({

@@ -1871,6 +1871,132 @@ textarea:focus-visible {
   border-color: #cddfcf;
   color: #4d795c;
 }
+.schedule-helper {
+  margin: -6px 0 12px;
+  color: #8b978e;
+  font-size: 9px;
+  line-height: 1.6;
+}
+.weekly-training-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin-bottom: 17px;
+}
+.training-day-card {
+  min-width: 0;
+  border: 1px solid #e8ede8;
+  border-radius: 9px;
+  padding: 10px;
+  background: #fff;
+}
+.training-day-card.is-active {
+  border-color: #cbdccf;
+  background: #fbfdfb;
+}
+.training-day-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 9px;
+}
+.training-day-initial {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  border-radius: 8px;
+  color: #718077;
+  background: #f1f4f1;
+  font-size: 10px;
+  font-weight: 800;
+}
+.training-day-card.is-active .training-day-initial {
+  color: #37684b;
+  background: #eaf2eb;
+}
+.training-day-heading strong {
+  color: #435147;
+  font-size: 10px;
+}
+.training-day-heading small {
+  margin-left: auto;
+  color: #a0aaa2;
+  font-size: 8px;
+}
+.training-day-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+.training-option {
+  min-width: 0;
+  min-height: 32px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #edf0ed;
+  border-radius: 6px;
+  padding: 5px 6px;
+  color: #78847b;
+  cursor: pointer;
+  font-size: 8px;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    color 0.15s;
+}
+.training-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.training-option > svg {
+  flex: none;
+  color: #9ba69e;
+}
+.training-option span {
+  flex: 1;
+  line-height: 1.25;
+}
+.training-option i {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid #dfe5df;
+  border-radius: 4px;
+  color: #fff;
+  font-style: normal;
+}
+.training-option.is-selected {
+  border-color: #c7d9cb;
+  background: #edf5ee;
+  color: #376b4d;
+}
+.training-option.is-selected > svg {
+  color: #4f8062;
+}
+.training-option.is-selected i {
+  border-color: #639276;
+  background: #639276;
+}
+.training-option:focus-within {
+  outline: 2px solid #8bad94;
+  outline-offset: 1px;
+}
+.long-run-option {
+  grid-column: 1 / -1;
+}
+.generate-inline-hint {
+  margin: 8px 0 0;
+  color: #a5684c;
+  font-size: 8px;
+  line-height: 1.5;
+}
 .form-actions {
   display: flex;
   align-items: center;
@@ -2280,6 +2406,105 @@ textarea:focus-visible {
   color: #cf946a;
   flex: none;
 }
+.auth-mode-toggle {
+  border: 0;
+  background: transparent;
+  color: #4f8063;
+  cursor: pointer;
+  display: block;
+  padding: 12px 0 0;
+  font: inherit;
+  font-size: 10px;
+}
+.admin-role-pill {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 99px;
+  background: #edf4ee;
+  color: #50785e;
+  padding: 7px 10px;
+  font-size: 9px;
+}
+.admin-logout {
+  margin-left: 10px;
+  font-size: 9px;
+  white-space: nowrap;
+}
+.admin-busy-indicator {
+  position: fixed;
+  right: 18px;
+  bottom: 14px;
+  color: #607667;
+  font-size: 9px;
+}
+.admin-users-panel {
+  padding: 18px;
+}
+.admin-users-panel .panel-heading h3 {
+  margin: 5px 0 0;
+}
+.admin-users-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+.admin-user-card {
+  border: 1px solid #e9eee9;
+  border-radius: 10px;
+  padding: 13px;
+  display: grid;
+  gap: 12px;
+}
+.admin-user-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.admin-user-identity .avatar {
+  flex: none;
+}
+.admin-user-identity strong,
+.admin-user-identity span {
+  display: block;
+}
+.admin-user-identity strong {
+  color: #36463b;
+  font-size: 11px;
+}
+.admin-user-identity span {
+  margin-top: 3px;
+  color: #8e9991;
+  font-size: 9px;
+}
+.admin-reset-row,
+.admin-user-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.admin-reset-row input {
+  flex: 1 1 210px;
+  min-width: 0;
+  border: 1px solid #e4e9e4;
+  border-radius: 7px;
+  padding: 10px 11px;
+  font: inherit;
+  font-size: 10px;
+}
+.button-danger {
+  background: #fff3ef;
+  border: 1px solid #f0d5cc;
+  color: #a9533c;
+}
+.button-danger:hover {
+  background: #fce8e2;
+}
+.admin-user-card .button {
+  font-size: 9px;
+}
 .scrim {
   display: none;
 }
@@ -2509,6 +2734,14 @@ textarea:focus-visible {
   }
 }
 @media (max-width: 620px) {
+  .admin-role-pill {
+    display: none;
+  }
+  .admin-logout {
+    margin-left: auto;
+    padding: 8px;
+    font-size: 0;
+  }
   .topbar {
     padding: 0 15px;
   }
