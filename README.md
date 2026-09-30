@@ -1,4 +1,4 @@
-# Stride · entrenamiento híbrido
+# Rompesuelas · entrenamiento híbrido
 
 Aplicación personal local para planificar carrera y fuerza, registrar actividades FIT/GPX y conservar el historial de cada versión del plan.
 

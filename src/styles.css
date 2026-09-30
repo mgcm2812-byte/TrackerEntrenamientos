@@ -61,7 +61,7 @@ textarea:focus-visible {
   justify-items: center;
   gap: 16px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14.56px;
 }
 .brand-mark {
   width: 37px;
@@ -73,7 +73,7 @@ textarea:focus-visible {
   place-items: center;
   font-family: Manrope, sans-serif;
   font-weight: 800;
-  font-size: 20px;
+  font-size: 22.4px;
   letter-spacing: -2px;
   box-shadow: 0 5px 12px #225b4b35;
 }
@@ -102,7 +102,7 @@ textarea:focus-visible {
   display: block;
   font-family: Manrope, sans-serif;
   font-weight: 800;
-  font-size: 18px;
+  font-size: 20.16px;
   letter-spacing: -0.8px;
   line-height: 1.05;
 }
@@ -110,12 +110,12 @@ textarea:focus-visible {
   display: block;
   margin-top: 4px;
   color: #a2aaa5;
-  font-size: 8px;
+  font-size: 10.5px;
   letter-spacing: 1.8px;
   font-weight: 700;
 }
 .sidebar-caption {
-  font-size: 9px;
+  font-size: 10.5px;
   letter-spacing: 1.45px;
   color: #a3aba6;
   font-weight: 700;
@@ -139,7 +139,7 @@ textarea:focus-visible {
   text-align: left;
   padding: 11px 11px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 13.44px;
   font-weight: 600;
   transition:
     background 0.18s,
@@ -162,7 +162,7 @@ textarea:focus-visible {
   background: #fff0e7;
   padding: 3px 6px;
   border-radius: 4px;
-  font-size: 8px;
+  font-size: 10.5px;
   margin-left: auto;
 }
 .sidebar-bottom {
@@ -193,12 +193,12 @@ textarea:focus-visible {
   display: block;
 }
 .coach-card strong {
-  font-size: 10px;
+  font-size: 11.2px;
   font-weight: 700;
   margin: 1px 0 4px;
 }
 .coach-card span {
-  font-size: 9px;
+  font-size: 10.5px;
   color: #89958d;
   line-height: 1.45;
 }
@@ -213,7 +213,7 @@ textarea:focus-visible {
 .top-avatar {
   background: #eedbc8;
   color: #8c5c3d;
-  font-size: 11px;
+  font-size: 12.32px;
   font-weight: 700;
   display: grid;
   place-items: center;
@@ -236,11 +236,11 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 .account-copy strong {
-  font-size: 10px;
+  font-size: 11.2px;
 }
 .account-copy span {
   color: #99a19c;
-  font-size: 9px;
+  font-size: 10.5px;
   margin-top: 3px;
 }
 .icon-button {
@@ -292,7 +292,7 @@ textarea:focus-visible {
 }
 .crumb {
   gap: 10px;
-  font-size: 11px;
+  font-size: 12.32px;
   color: #929d96;
 }
 .crumb strong {
@@ -310,7 +310,7 @@ textarea:focus-visible {
   align-items: center;
   gap: 7px;
   color: #839088;
-  font-size: 10px;
+  font-size: 11.2px;
 }
 .local-indicator > span {
   width: 6px;
@@ -323,7 +323,7 @@ textarea:focus-visible {
   width: 29px;
   height: 29px;
   border-radius: 50%;
-  font-size: 10px;
+  font-size: 11.2px;
 }
 .page-content {
   max-width: 1290px;
@@ -337,14 +337,14 @@ textarea:focus-visible {
   margin-bottom: 23px;
 }
 .eyebrow {
-  font-size: 8px;
+  font-size: 10.5px;
   letter-spacing: 1.45px;
   font-weight: 700;
   color: #9aa59d;
 }
 .page-heading h1 {
   font-family: Manrope, sans-serif;
-  font-size: 24px;
+  font-size: 26.88px;
   letter-spacing: -0.9px;
   margin: 6px 0 4px;
   font-weight: 700;
@@ -352,7 +352,7 @@ textarea:focus-visible {
 .page-heading p {
   margin: 0;
   color: #8c9890;
-  font-size: 11px;
+  font-size: 12.32px;
 }
 .plan-version-pill {
   background: white;
@@ -360,7 +360,7 @@ textarea:focus-visible {
   padding: 8px 11px;
   border-radius: 7px;
   color: #69766e;
-  font-size: 10px;
+  font-size: 11.2px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -399,7 +399,7 @@ textarea:focus-visible {
   gap: 7px;
   color: #c7ded0;
   letter-spacing: 1.15px;
-  font-size: 8px;
+  font-size: 10.5px;
   font-weight: 700;
 }
 .hero-kicker-dot {
@@ -411,7 +411,7 @@ textarea:focus-visible {
 .hero-copy h2 {
   font-family: Manrope, sans-serif;
   font-weight: 600;
-  font-size: 29px;
+  font-size: 32.48px;
   letter-spacing: -1.2px;
   line-height: 1.18;
   margin: 14px 0 8px;
@@ -421,7 +421,7 @@ textarea:focus-visible {
   color: #f4a477;
 }
 .hero-copy p {
-  font-size: 11px;
+  font-size: 12.32px;
   color: #c7d8cd;
   margin: 0 0 17px;
 }
@@ -432,7 +432,7 @@ textarea:focus-visible {
   align-items: center;
   justify-content: center;
   gap: 9px;
-  font-size: 10px;
+  font-size: 11.2px;
   font-weight: 700;
   border: 1px solid transparent;
   transition:
@@ -528,14 +528,14 @@ textarea:focus-visible {
   position: absolute;
   right: 14px;
   bottom: 9px;
-  font-size: 10px;
+  font-size: 11.2px;
   font-weight: 700;
   letter-spacing: 1px;
   color: #f3c9a8;
 }
 .route-label span {
   display: block;
-  font-size: 7px;
+  font-size: 10.5px;
   color: #d5e4da;
   letter-spacing: 1.5px;
   margin-top: 3px;
@@ -556,7 +556,7 @@ textarea:focus-visible {
   transform: rotate(10deg);
 }
 .hero-stamp span {
-  font-size: 6px;
+  font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 1px;
   line-height: 1.3;
@@ -609,11 +609,11 @@ textarea:focus-visible {
   top: 22px;
   left: 54px;
   color: #758178;
-  font-size: 10px;
+  font-size: 11.2px;
 }
 .stat-value {
   font-family: Manrope, sans-serif;
-  font-size: 18px;
+  font-size: 20.16px;
   font-weight: 700;
   letter-spacing: -0.6px;
   line-height: 1.25;
@@ -621,7 +621,7 @@ textarea:focus-visible {
 .stat-detail {
   margin-top: 4px;
   color: #9aa39d;
-  font-size: 9px;
+  font-size: 10.5px;
 }
 .mini-progress {
   height: 3px;
@@ -662,11 +662,11 @@ textarea:focus-visible {
 }
 .proposal-copy h3 {
   font-family: Manrope, sans-serif;
-  font-size: 14px;
+  font-size: 15.68px;
   margin: 5px 0;
 }
 .proposal-copy p {
-  font-size: 10px;
+  font-size: 11.2px;
   line-height: 1.6;
   color: #7e8880;
   margin: 0;
@@ -725,7 +725,7 @@ textarea:focus-visible {
 }
 .panel-heading h3 {
   font-family: Manrope, sans-serif;
-  font-size: 14px;
+  font-size: 15.68px;
   letter-spacing: -0.3px;
   margin: 5px 0 0;
 }
@@ -737,7 +737,7 @@ textarea:focus-visible {
   align-items: center;
   gap: 5px;
   color: #557865;
-  font-size: 9px;
+  font-size: 10.5px;
   font-weight: 700;
 }
 .text-link:hover {
@@ -791,13 +791,13 @@ textarea:focus-visible {
 .session-date-block span {
   display: block;
   text-transform: uppercase;
-  font-size: 7px;
+  font-size: 10.5px;
   letter-spacing: 0.5px;
 }
 .session-date-block strong {
   display: block;
   font-family: Manrope, sans-serif;
-  font-size: 14px;
+  font-size: 15.68px;
   margin-top: 2px;
   color: #43524a;
 }
@@ -830,7 +830,7 @@ textarea:focus-visible {
   flex-wrap: wrap;
 }
 .session-info h4 {
-  font-size: 10px;
+  font-size: 11.2px;
   margin: 0;
   font-weight: 700;
   color: #35423a;
@@ -838,11 +838,11 @@ textarea:focus-visible {
 .session-info > span {
   display: block;
   color: #939c96;
-  font-size: 8px;
+  font-size: 10.5px;
   margin-top: 3px;
 }
 .session-info p {
-  font-size: 9px;
+  font-size: 10.5px;
   line-height: 1.55;
   color: #7c8880;
   margin: 6px 0 0;
@@ -857,11 +857,11 @@ textarea:focus-visible {
   display: block;
 }
 .session-metrics strong {
-  font-size: 10px;
+  font-size: 11.2px;
   color: #4b5a50;
 }
 .session-metrics span {
-  font-size: 8px;
+  font-size: 10.5px;
   color: #9aa49d;
   margin-top: 4px;
 }
@@ -870,7 +870,7 @@ textarea:focus-visible {
   border-radius: 4px;
   background: #e4f1e7;
   color: #4b8760;
-  font-size: 7px;
+  font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.5px;
   padding: 3px 5px;
@@ -899,10 +899,10 @@ textarea:focus-visible {
   width: 24px;
 }
 .is-compact .session-date-block span {
-  font-size: 7px;
+  font-size: 10.5px;
 }
 .is-compact .session-date-block strong {
-  font-size: 11px;
+  font-size: 12.32px;
 }
 .is-compact .session-icon {
   width: 25px;
@@ -914,13 +914,13 @@ textarea:focus-visible {
   height: 14px;
 }
 .is-compact .session-info h4 {
-  font-size: 9px;
+  font-size: 10.5px;
 }
 .is-compact .session-info > span {
-  font-size: 7px;
+  font-size: 10.5px;
 }
 .is-compact .session-metrics strong {
-  font-size: 9px;
+  font-size: 10.5px;
 }
 .is-compact .session-metrics span {
   display: none;
@@ -933,7 +933,7 @@ textarea:focus-visible {
   align-items: center;
   gap: 8px;
   color: #9ca59e;
-  font-size: 9px;
+  font-size: 10.5px;
   padding: 12px 0;
 }
 .rest-message > span {
@@ -960,7 +960,7 @@ textarea:focus-visible {
   align-items: center;
   gap: 8px;
   color: #75837a;
-  font-size: 10px;
+  font-size: 11.2px;
 }
 .goal-date svg {
   color: #91a095;
@@ -975,11 +975,11 @@ textarea:focus-visible {
 }
 .goal-countdown strong {
   font-family: Manrope, sans-serif;
-  font-size: 22px;
+  font-size: 24.64px;
   letter-spacing: -1px;
 }
 .goal-countdown span {
-  font-size: 9px;
+  font-size: 10.5px;
   color: #9aa49d;
 }
 .goal-progress-track {
@@ -999,12 +999,12 @@ textarea:focus-visible {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 9px;
+  font-size: 10.5px;
   color: #869188;
   margin-top: 12px;
 }
 .goal-empty-copy {
-  font-size: 10px;
+  font-size: 11.2px;
   color: #929c95;
   line-height: 1.6;
   margin: 21px 0 15px;
@@ -1037,23 +1037,23 @@ textarea:focus-visible {
   flex: none;
 }
 .coach-note strong {
-  font-size: 9px;
+  font-size: 10.5px;
 }
 .coach-note p {
   margin: 4px 0 0;
   color: #829087;
-  font-size: 8px;
+  font-size: 10.5px;
 }
 .reevaluate-button {
   white-space: nowrap;
-  font-size: 9px;
+  font-size: 10.5px;
 }
 .page-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
   color: #a0a9a2;
-  font-size: 8px;
+  font-size: 10.5px;
   padding: 22px 1px 3px;
 }
 .page-footer span:last-child {
@@ -1071,7 +1071,7 @@ textarea:focus-visible {
   padding: 10px 12px;
   border-radius: 8px;
   margin: 0 0 13px;
-  font-size: 10px;
+  font-size: 11.2px;
 }
 .toast button {
   margin-left: auto;
@@ -1111,22 +1111,22 @@ textarea:focus-visible {
 .empty-plan h4,
 .empty-history h4 {
   font-family: Manrope, sans-serif;
-  font-size: 12px;
+  font-size: 13.44px;
   margin: 12px 0 5px;
 }
 .empty-plan p,
 .empty-history p {
   max-width: 310px;
   color: #919c94;
-  font-size: 9px;
+  font-size: 10.5px;
   line-height: 1.6;
   margin: 0 0 13px;
 }
 .empty-plan .button {
-  font-size: 9px;
+  font-size: 10.5px;
 }
 .goal-panel .panel-heading h3 {
-  font-size: 14px;
+  font-size: 15.68px;
 }
 .auth-page {
   min-height: 100vh;
@@ -1150,7 +1150,7 @@ textarea:focus-visible {
   gap: 10px;
   font-family: Manrope, sans-serif;
   font-weight: 800;
-  font-size: 18px;
+  font-size: 20.16px;
   letter-spacing: -0.7px;
 }
 .art-rings {
@@ -1229,13 +1229,13 @@ textarea:focus-visible {
 }
 .auth-art-copy p {
   color: #c1d4c8;
-  font-size: 12px;
+  font-size: 13.44px;
 }
 .art-coordinate {
   position: absolute;
   left: 43px;
   bottom: 32px;
-  font-size: 8px;
+  font-size: 10.5px;
   letter-spacing: 1px;
   color: #abc6b5;
 }
@@ -1262,13 +1262,13 @@ textarea:focus-visible {
 }
 .auth-form-wrap h1 {
   font-family: Manrope, sans-serif;
-  font-size: 28px;
+  font-size: 31.36px;
   letter-spacing: -1px;
   margin: 10px 0;
 }
 .auth-form-wrap > p {
   color: #929c95;
-  font-size: 11px;
+  font-size: 12.32px;
   line-height: 1.6;
   margin: 0 0 25px;
 }
@@ -1279,7 +1279,7 @@ textarea:focus-visible {
 .auth-form label {
   display: grid;
   gap: 7px;
-  font-size: 9px;
+  font-size: 10.5px;
   font-weight: 700;
   color: #556259;
 }
@@ -1293,7 +1293,7 @@ textarea:focus-visible {
   background: #fff;
   padding: 10px 11px;
   color: #35423a;
-  font-size: 10px;
+  font-size: 11.2px;
   outline: none;
   transition:
     border 0.15s,
@@ -1326,13 +1326,13 @@ textarea:focus-visible {
   align-items: center;
   gap: 7px;
   color: #9aa49d;
-  font-size: 9px;
+  font-size: 10.5px;
 }
 .auth-privacy svg {
   color: #75a081;
 }
 .inline-error {
-  font-size: 10px;
+  font-size: 11.2px;
   color: #ae523a;
   background: #fff1ed;
   padding: 9px;
@@ -1352,13 +1352,13 @@ textarea:focus-visible {
 }
 .setup-plan-panel h2 {
   font-family: Manrope, sans-serif;
-  font-size: 18px;
+  font-size: 20.16px;
   margin: 14px 0 8px;
 }
 .setup-plan-panel > p {
   max-width: 440px;
   margin: 0 auto 18px;
-  font-size: 10px;
+  font-size: 11.2px;
   color: #89958d;
   line-height: 1.7;
 }
@@ -1370,7 +1370,7 @@ textarea:focus-visible {
   color: #79877e;
   padding: 11px 12px;
   border-radius: 8px;
-  font-size: 9px;
+  font-size: 10.5px;
   line-height: 1.5;
   margin: 14px 0;
 }
@@ -1410,18 +1410,18 @@ textarea:focus-visible {
 }
 .plan-phase-card > div span,
 .plan-summary-stat > span {
-  font-size: 8px;
+  font-size: 10.5px;
   letter-spacing: 0.8px;
   color: #9aa49c;
   font-weight: 700;
 }
 .plan-phase-card > div strong {
   font-family: Manrope, sans-serif;
-  font-size: 13px;
+  font-size: 14.56px;
   margin-top: 4px;
 }
 .phase-step {
-  font-size: 8px;
+  font-size: 10.5px;
   letter-spacing: 0.5px;
   color: #829087;
   background: #f4f6f3;
@@ -1436,12 +1436,12 @@ textarea:focus-visible {
 }
 .plan-summary-stat strong {
   font-family: Manrope, sans-serif;
-  font-size: 19px;
+  font-size: 21.28px;
   letter-spacing: -0.7px;
 }
 .plan-summary-stat strong small {
   font-family: "DM Sans", sans-serif;
-  font-size: 10px;
+  font-size: 11.2px;
   font-weight: 500;
   color: #a0aaa2;
   letter-spacing: 0;
@@ -1456,7 +1456,7 @@ textarea:focus-visible {
 }
 .schedule-top h2 {
   font-family: Manrope, sans-serif;
-  font-size: 19px;
+  font-size: 21.28px;
   margin: 6px 0 0;
   display: flex;
   align-items: baseline;
@@ -1465,7 +1465,7 @@ textarea:focus-visible {
 .schedule-week-date {
   font-family: "DM Sans", sans-serif;
   color: #9aa39c;
-  font-size: 9px;
+  font-size: 10.5px;
   font-weight: 400;
   letter-spacing: 0;
 }
@@ -1475,7 +1475,7 @@ textarea:focus-visible {
   gap: 5px;
 }
 .week-nav span {
-  font-size: 9px;
+  font-size: 10.5px;
   color: #6f7b72;
   min-width: 42px;
   text-align: center;
@@ -1516,18 +1516,18 @@ textarea:focus-visible {
   background: #f7faf7;
 }
 .schedule-day > span {
-  font-size: 7px;
+  font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.6px;
 }
 .schedule-day > strong {
   font-family: Manrope, sans-serif;
-  font-size: 14px;
+  font-size: 15.68px;
   color: #58665c;
 }
 .schedule-day > i {
   font-style: normal;
-  font-size: 6px;
+  font-size: 10.5px;
   letter-spacing: 0.35px;
   color: #afb7b0;
   min-height: 8px;
@@ -1569,11 +1569,11 @@ textarea:focus-visible {
   display: block;
 }
 .schedule-date-label strong {
-  font-size: 9px;
+  font-size: 10.5px;
   text-transform: capitalize;
 }
 .schedule-date-label span {
-  font-size: 8px;
+  font-size: 10.5px;
   color: #a1aaa3;
   margin-top: 4px;
 }
@@ -1594,11 +1594,11 @@ textarea:focus-visible {
   background: #e3e9e2;
 }
 .rest-day-card > span {
-  font-size: 9px;
+  font-size: 10.5px;
   color: #7f8c82;
 }
 .rest-day-card small {
-  font-size: 8px;
+  font-size: 10.5px;
   color: #a4ada6;
   margin-left: auto;
 }
@@ -1628,12 +1628,12 @@ textarea:focus-visible {
 }
 .plan-guidance h3 {
   font-family: Manrope, sans-serif;
-  font-size: 13px;
+  font-size: 14.56px;
   line-height: 1.45;
   margin: 8px 0;
 }
 .plan-guidance p {
-  font-size: 9px;
+  font-size: 10.5px;
   color: #849087;
   line-height: 1.75;
   margin: 0;
@@ -1646,14 +1646,14 @@ textarea:focus-visible {
   margin-top: 7px;
 }
 .principle-row span {
-  font-size: 8px;
+  font-size: 10.5px;
   color: #7b9b81;
   font-weight: 700;
 }
 .principle-row p {
   margin: 0;
   color: #849087;
-  font-size: 8px;
+  font-size: 10.5px;
   line-height: 1.55;
 }
 .plan-change-note {
@@ -1672,10 +1672,10 @@ textarea:focus-visible {
   gap: 4px;
 }
 .plan-change-note strong {
-  font-size: 9px;
+  font-size: 10.5px;
 }
 .plan-change-note span {
-  font-size: 9px;
+  font-size: 10.5px;
   color: #819489;
 }
 .schedule-list .session-pill {
@@ -1722,16 +1722,16 @@ textarea:focus-visible {
 }
 .form-section-heading h3 {
   font-family: Manrope, sans-serif;
-  font-size: 12px;
+  font-size: 13.44px;
   margin: 0;
 }
 .form-section-heading p {
-  font-size: 8px;
+  font-size: 10.5px;
   color: #9ba49d;
   margin: 4px 0 0;
 }
 .optional-badge {
-  font-size: 7px;
+  font-size: 10.5px;
   letter-spacing: 0.6px;
   color: #73947a;
   background: #eff6f0;
@@ -1760,12 +1760,12 @@ textarea:focus-visible {
   grid-column: 1/-1;
 }
 .field-label {
-  font-size: 8px;
+  font-size: 10.5px;
   font-weight: 700;
   color: #5b685f;
 }
 .field small {
-  font-size: 7px;
+  font-size: 10.5px;
   color: #a3ada5;
   line-height: 1.4;
 }
@@ -1774,7 +1774,7 @@ textarea:focus-visible {
 .field textarea {
   min-height: 35px;
   padding: 8px 9px;
-  font-size: 9px;
+  font-size: 10.5px;
 }
 .field textarea {
   resize: vertical;
@@ -1793,17 +1793,17 @@ textarea:focus-visible {
   right: 9px;
   transform: translateY(-50%);
   color: #a0aaa2;
-  font-size: 8px;
+  font-size: 10.5px;
   pointer-events: none;
 }
 .subsection-label {
-  font-size: 9px;
+  font-size: 10.5px;
   font-weight: 700;
   color: #56645b;
   margin: 17px 0 9px;
 }
 .subsection-label span {
-  font-size: 8px;
+  font-size: 10.5px;
   font-weight: 400;
   color: #a2aaa4;
   margin-left: 5px;
@@ -1827,11 +1827,11 @@ textarea:focus-visible {
 }
 .day-selector button > span {
   font-family: Manrope, sans-serif;
-  font-size: 12px;
+  font-size: 13.44px;
   font-weight: 700;
 }
 .day-selector button > small {
-  font-size: 7px;
+  font-size: 10.5px;
 }
 .day-selector button.chosen {
   background: #edf5ee;
@@ -1864,7 +1864,7 @@ textarea:focus-visible {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 8px;
+  font-size: 10.5px;
 }
 .choice-chip.selected {
   background: #eff5f0;
@@ -1874,7 +1874,7 @@ textarea:focus-visible {
 .schedule-helper {
   margin: -6px 0 12px;
   color: #8b978e;
-  font-size: 9px;
+  font-size: 10.5px;
   line-height: 1.6;
 }
 .weekly-training-grid {
@@ -1908,7 +1908,7 @@ textarea:focus-visible {
   border-radius: 8px;
   color: #718077;
   background: #f1f4f1;
-  font-size: 10px;
+  font-size: 11.2px;
   font-weight: 800;
 }
 .training-day-card.is-active .training-day-initial {
@@ -1917,12 +1917,12 @@ textarea:focus-visible {
 }
 .training-day-heading strong {
   color: #435147;
-  font-size: 10px;
+  font-size: 11.2px;
 }
 .training-day-heading small {
   margin-left: auto;
   color: #a0aaa2;
-  font-size: 8px;
+  font-size: 10.5px;
 }
 .training-day-options {
   display: grid;
@@ -1941,7 +1941,7 @@ textarea:focus-visible {
   padding: 5px 6px;
   color: #78847b;
   cursor: pointer;
-  font-size: 8px;
+  font-size: 10.5px;
   transition:
     border-color 0.15s,
     background 0.15s,
@@ -1994,7 +1994,7 @@ textarea:focus-visible {
 .generate-inline-hint {
   margin: 8px 0 0;
   color: #a5684c;
-  font-size: 8px;
+  font-size: 10.5px;
   line-height: 1.5;
 }
 .form-actions {
@@ -2013,7 +2013,7 @@ textarea:focus-visible {
   color: #929c94;
   padding: 9px;
   border-radius: 6px;
-  font-size: 8px;
+  font-size: 10.5px;
   line-height: 1.5;
 }
 .goal-form .button {
@@ -2037,17 +2037,17 @@ textarea:focus-visible {
 }
 .generate-panel h3 {
   font-family: Manrope, sans-serif;
-  font-size: 14px;
+  font-size: 15.68px;
   margin: 7px 0;
 }
 .generate-panel > p {
-  font-size: 9px;
+  font-size: 10.5px;
   color: #829087;
   line-height: 1.65;
   margin: 0 0 14px;
 }
 .generate-panel .button {
-  font-size: 9px;
+  font-size: 10.5px;
 }
 .generate-checks {
   display: grid;
@@ -2059,7 +2059,7 @@ textarea:focus-visible {
   align-items: center;
   gap: 6px;
   color: #789080;
-  font-size: 8px;
+  font-size: 10.5px;
 }
 .generate-checks svg {
   color: #75a17c;
@@ -2069,7 +2069,7 @@ textarea:focus-visible {
   align-items: flex-start;
   gap: 8px;
   color: #8e9b91;
-  font-size: 8px;
+  font-size: 10.5px;
   line-height: 1.55;
   padding: 4px 3px;
 }
@@ -2086,11 +2086,11 @@ textarea:focus-visible {
 }
 .import-copy h2 {
   font-family: Manrope, sans-serif;
-  font-size: 17px;
+  font-size: 19.04px;
   margin: 7px 0;
 }
 .import-copy p {
-  font-size: 9px;
+  font-size: 10.5px;
   color: #909b93;
   line-height: 1.65;
   max-width: 400px;
@@ -2106,11 +2106,11 @@ textarea:focus-visible {
   border-radius: 5px;
   padding: 6px 7px;
   color: #53645a;
-  font-size: 8px;
+  font-size: 10.5px;
   font-weight: 700;
 }
 .format-tags small {
-  font-size: 7px;
+  font-size: 10.5px;
   color: #9da79f;
   font-weight: 400;
   margin-left: 5px;
@@ -2149,15 +2149,15 @@ textarea:focus-visible {
   margin-bottom: 3px;
 }
 .upload-dropzone strong {
-  font-size: 9px;
+  font-size: 10.5px;
   color: #4f6657;
 }
 .upload-dropzone > span {
-  font-size: 8px;
+  font-size: 10.5px;
   color: #9ca79e;
 }
 .upload-dropzone > small {
-  font-size: 7px;
+  font-size: 10.5px;
   letter-spacing: 0.6px;
   color: #b1b9b1;
   margin-top: 3px;
@@ -2174,7 +2174,7 @@ textarea:focus-visible {
 .activity-preview-panel .panel-heading h3,
 .activity-history-panel .panel-heading h3 {
   font-family: Manrope, sans-serif;
-  font-size: 13px;
+  font-size: 14.56px;
   margin: 5px 0 0;
 }
 .preview-stats {
@@ -2191,12 +2191,12 @@ textarea:focus-visible {
   gap: 6px;
 }
 .preview-stats span {
-  font-size: 7px;
+  font-size: 10.5px;
   letter-spacing: 0.6px;
   color: #a1aaa3;
 }
 .preview-stats strong {
-  font-size: 10px;
+  font-size: 11.2px;
 }
 .activity-preview-panel .form-grid {
   margin-top: 0;
@@ -2208,7 +2208,7 @@ textarea:focus-visible {
   background: #f2f5f1;
   color: #879389;
   border-radius: 10px;
-  font-size: 8px;
+  font-size: 10.5px;
   padding: 5px 8px;
 }
 .activity-table {
@@ -2227,7 +2227,7 @@ textarea:focus-visible {
   padding: 9px 6px;
   border-bottom: 1px solid #edf0ed;
   color: #a4ada5;
-  font-size: 7px;
+  font-size: 10.5px;
   letter-spacing: 0.7px;
   font-weight: 700;
 }
@@ -2287,10 +2287,10 @@ textarea:focus-visible {
   text-overflow: ellipsis;
 }
 .activity-name strong {
-  font-size: 9px;
+  font-size: 10.5px;
 }
 .activity-name span {
-  font-size: 8px;
+  font-size: 10.5px;
   color: #9aa39c;
   margin-top: 4px;
 }
@@ -2300,20 +2300,20 @@ textarea:focus-visible {
   gap: 2px;
   margin-top: 4px;
   color: #4f8062;
-  font-size: 8px;
+  font-size: 10.5px;
 }
 .activity-date,
 .activity-duration {
-  font-size: 8px;
+  font-size: 10.5px;
   color: #829087;
 }
 .activity-distance {
   font-family: Manrope, sans-serif;
-  font-size: 10px;
+  font-size: 11.2px;
 }
 .activity-rpe {
   color: #98a199;
-  font-size: 8px;
+  font-size: 10.5px;
 }
 .activity-rpe i {
   font-style: normal;
@@ -2364,7 +2364,7 @@ textarea:focus-visible {
 .activity-detail-title p {
   margin: 0;
   color: #859187;
-  font-size: 9px;
+  font-size: 10.5px;
 }
 .activity-detail-record-count {
   flex: none;
@@ -2372,7 +2372,7 @@ textarea:focus-visible {
   background: #f1f4f1;
   color: #6f7e72;
   padding: 7px 10px;
-  font-size: 8px;
+  font-size: 10.5px;
 }
 .activity-detail-metrics {
   display: grid;
@@ -2386,7 +2386,7 @@ textarea:focus-visible {
 .activity-metric-card span {
   display: block;
   color: #9aa49c;
-  font-size: 7px;
+  font-size: 10.5px;
   letter-spacing: 0.5px;
 }
 .activity-metric-card strong {
@@ -2424,7 +2424,7 @@ textarea:focus-visible {
 .activity-section-heading > span {
   padding-top: 4px;
   color: #929d94;
-  font-size: 8px;
+  font-size: 10.5px;
 }
 .activity-chart {
   display: block;
@@ -2440,12 +2440,12 @@ textarea:focus-visible {
 .chart-axis-label {
   fill: #9aa49c;
   font-family: Inter, sans-serif;
-  font-size: 11px;
+  font-size: 12.32px;
 }
 .chart-x-axis {
   color: #a0aaa2;
   text-align: center;
-  font-size: 8px;
+  font-size: 10.5px;
 }
 .activity-no-charts,
 .activity-fit-legacy-note {
@@ -2457,7 +2457,7 @@ textarea:focus-visible {
   background: #fffaf2;
   color: #8e7856;
   padding: 12px 14px;
-  font-size: 9px;
+  font-size: 10.5px;
   line-height: 1.55;
 }
 .activity-no-charts svg,
@@ -2472,19 +2472,19 @@ textarea:focus-visible {
 }
 .activity-athlete-note strong {
   color: #47594b;
-  font-size: 10px;
+  font-size: 11.2px;
 }
 .activity-athlete-note p {
   margin: 7px 0 0;
   color: #89948b;
-  font-size: 9px;
+  font-size: 10.5px;
   line-height: 1.6;
 }
 .activity-athlete-note > span {
   display: block;
   margin-top: 6px;
   color: #a4614c;
-  font-size: 9px;
+  font-size: 10.5px;
 }
 .activity-laps-list {
   display: grid;
@@ -2501,7 +2501,7 @@ textarea:focus-visible {
   padding: 10px 4px;
   border-top: 1px solid #edf0ed;
   color: #7f8b82;
-  font-size: 9px;
+  font-size: 10.5px;
 }
 .activity-lap-row > strong {
   color: #45564a;
@@ -2521,7 +2521,7 @@ textarea:focus-visible {
   gap: 9px;
   border-bottom: 1px solid #f0f2f0;
   padding: 5px 0;
-  font-size: 8px;
+  font-size: 10.5px;
 }
 .fit-field-list dt {
   color: #8a968d;
@@ -2538,7 +2538,7 @@ textarea:focus-visible {
   max-width: 700px;
   margin: 6px 0 0;
   color: #909a92;
-  font-size: 9px;
+  font-size: 10.5px;
   line-height: 1.6;
 }
 .activity-full-fit-json {
@@ -2563,11 +2563,11 @@ textarea:focus-visible {
   justify-items: center;
   gap: 9px;
   color: #87948a;
-  font-size: 10px;
+  font-size: 11.2px;
 }
 .activity-detail-error p {
   color: #a45b45;
-  font-size: 10px;
+  font-size: 11.2px;
 }
 .empty-history {
   padding: 30px 15px;
@@ -2577,7 +2577,7 @@ textarea:focus-visible {
   align-items: center;
   gap: 8px;
   color: #96a198;
-  font-size: 8px;
+  font-size: 10.5px;
   line-height: 1.5;
   padding: 12px 2px;
 }
@@ -2617,11 +2617,11 @@ textarea:focus-visible {
 }
 .settings-intro h2 {
   font-family: Manrope, sans-serif;
-  font-size: 15px;
+  font-size: 16.8px;
   margin: 5px 0;
 }
 .settings-intro p {
-  font-size: 9px;
+  font-size: 10.5px;
   line-height: 1.65;
   color: #8c9990;
   margin: 0;
@@ -2647,18 +2647,18 @@ textarea:focus-visible {
 }
 .settings-card h3 {
   font-family: Manrope, sans-serif;
-  font-size: 12px;
+  font-size: 13.44px;
   margin: 0 0 6px;
 }
 .settings-card p {
-  font-size: 9px;
+  font-size: 10.5px;
   color: #8e9991;
   line-height: 1.65;
   min-height: 45px;
   margin: 0 0 13px;
 }
 .settings-card .button {
-  font-size: 9px;
+  font-size: 10.5px;
 }
 .settings-file-label {
   cursor: pointer;
@@ -2668,7 +2668,7 @@ textarea:focus-visible {
   align-items: center;
   gap: 8px;
   color: #929d95;
-  font-size: 8px;
+  font-size: 10.5px;
   padding: 2px 2px;
 }
 .backup-warning svg {
@@ -2683,7 +2683,7 @@ textarea:focus-visible {
   display: block;
   padding: 12px 0 0;
   font: inherit;
-  font-size: 10px;
+  font-size: 11.2px;
 }
 .admin-role-pill {
   margin-left: auto;
@@ -2694,11 +2694,11 @@ textarea:focus-visible {
   background: #edf4ee;
   color: #50785e;
   padding: 7px 10px;
-  font-size: 9px;
+  font-size: 10.5px;
 }
 .admin-logout {
   margin-left: 10px;
-  font-size: 9px;
+  font-size: 10.5px;
   white-space: nowrap;
 }
 .admin-busy-indicator {
@@ -2706,7 +2706,7 @@ textarea:focus-visible {
   right: 18px;
   bottom: 14px;
   color: #607667;
-  font-size: 9px;
+  font-size: 10.5px;
 }
 .admin-users-panel {
   padding: 18px;
@@ -2728,7 +2728,7 @@ textarea:focus-visible {
   border-radius: 10px;
   color: var(--ink, #23312b);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14.56px;
 }
 .strength-division-option:has(input:checked),
 .strength-exercise-option:has(input:checked) {
@@ -2738,12 +2738,56 @@ textarea:focus-visible {
 .strength-division-option input,
 .strength-exercise-option input { accent-color: #347453; }
 .strength-group-panel { padding: 22px; }
-.strength-selected-count { color: #617169; font-size: 12px; }
+.strength-selected-count { color: #617169; font-size: 13.44px; }
 .strength-save-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.strength-save-row > span { color: #617169; font-size: 13px; }
+.strength-save-row > span { color: #617169; font-size: 14.56px; }
+.screening-section { margin-top: 20px; padding: 16px; border: 1px solid #e8e7dd; border-radius: 12px; background: #fcfcf8; }
+.screening-warning { color: #785c2e; font-size: 14.56px; line-height: 1.5; }
+.screening-review { margin: 10px 0 16px; font-weight: 650; }
+.screening-grid { margin: 12px 0; }
+.screening-grid .strength-exercise-option { min-height: 40px; font-size: 13.44px; }
+.day-duration-limit { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 8px; padding: 7px 2px; color: #68776f; font-size: 12.32px; }
+.day-duration-limit input { width: 72px; padding: 7px; border: 1px solid #dfe5e1; border-radius: 7px; }
+.algorithm-summary-panel { padding: 18px 22px; }
+.algorithm-summary-heading { display: flex; justify-content: space-between; align-items: center; gap: 14px; }
+.algorithm-summary-heading strong { display: block; margin-top: 5px; font-size: 14.56px; }
+.rules-reviewed-label { display: block; margin-top: 4px; color: #78867e; font-size: 11.2px; }
+.algorithm-level-pill { padding: 6px 10px; border-radius: 20px; background: #eef5f0; color: #35664e; font-size: 13.44px; }
+.goal-assessment { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 14px; padding-top: 13px; border-top: 1px solid #edf0ed; font-size: 14.56px; }
+.goal-assessment > strong { color: #355f49; }
+.goal-assessment > span { color: #63736a; }
+.goal-assessment p { flex-basis: 100%; margin: 0; color: #68776f; line-height: 1.5; }
+.goal-alternative { padding: 5px 8px; border: 1px solid #e4eae6; border-radius: 8px; background: #fafcfb; }
+.algorithm-warning { display: flex; align-items: flex-start; gap: 9px; margin: 12px 0 0; color: #785c2e; font-size: 14.56px; line-height: 1.5; }
+.algorithm-warning svg { flex: 0 0 auto; margin-top: 1px; }
+.plan-load-panel { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 17px 22px; }
+.plan-load-panel > div:first-child > strong { display: block; margin-top: 5px; color: #69766f; font-size: 12.32px; font-weight: 500; }
+.plan-load-metrics { display: flex; flex-wrap: wrap; gap: 12px 24px; }
+.plan-load-metrics span { display: grid; gap: 3px; }
+.plan-load-metrics small { color: #738178; font-size: 11.2px; }
+.plan-load-metrics b { color: #304f3d; font-size: 15.68px; }
+.decision-log { padding: 0 2px; color: #526259; font-size: 14.56px; }
+.decision-log summary { cursor: pointer; padding: 10px 0; font-weight: 650; }
+.decision-log-row { padding: 10px 12px; margin: 6px 0; border-left: 2px solid #bfd5c6; background: #f8faf8; }
+.decision-log-row strong { margin-right: 9px; }
+.decision-log-row small { color: #6d8174; }
+.decision-log-row p { margin: 6px 0 0; color: #68776f; line-height: 1.45; }
+.weekly-review-metrics { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 10px; color: #68776f; font-size: 13.44px; }
+.weekly-review-metrics span { display: flex; gap: 6px; }
+.weekly-review-metrics strong { color: #355f49; }
+.session-readiness { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid #d9e7df; border-radius: 50%; color: #367352; background: #f3f8f5; cursor: pointer; }
+.session-safety-message { color: #785c2e !important; font-size: 13.44px; }
+.readiness-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 20px; background: #15231db3; }
+.readiness-dialog { position: relative; width: min(720px, 100%); max-height: 90vh; overflow: auto; padding: 26px; }
+.readiness-dialog h3 { margin: 7px 0; }
+.readiness-dialog > p { color: #68776f; line-height: 1.5; }
+.readiness-close { position: absolute; top: 14px; right: 14px; }
+.readiness-dialog .form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 @media (max-width: 640px) {
   .strength-group-panel { padding: 16px; }
   .strength-save-row { align-items: stretch; flex-direction: column; }
+  .readiness-dialog { padding: 20px 15px; }
+  .plan-load-panel { align-items: flex-start; flex-direction: column; }
 }
 .admin-users-panel .panel-heading h3 {
   margin: 5px 0 0;
@@ -2774,12 +2818,12 @@ textarea:focus-visible {
 }
 .admin-user-identity strong {
   color: #36463b;
-  font-size: 11px;
+  font-size: 12.32px;
 }
 .admin-user-identity span {
   margin-top: 3px;
   color: #8e9991;
-  font-size: 9px;
+  font-size: 10.5px;
 }
 .admin-reset-row,
 .admin-user-actions {
@@ -2795,7 +2839,7 @@ textarea:focus-visible {
   border-radius: 7px;
   padding: 10px 11px;
   font: inherit;
-  font-size: 10px;
+  font-size: 11.2px;
 }
 .button-danger {
   background: #fff3ef;
@@ -2806,7 +2850,7 @@ textarea:focus-visible {
   background: #fce8e2;
 }
 .admin-user-card .button {
-  font-size: 9px;
+  font-size: 10.5px;
 }
 .scrim {
   display: none;
@@ -2837,7 +2881,7 @@ textarea:focus-visible {
   border-radius: 4px;
   background: #f4efec;
   color: #9b7667;
-  font-size: 7px;
+  font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.4px;
   padding: 3px 5px;
@@ -2857,11 +2901,11 @@ textarea:focus-visible {
   padding-left: 8px;
 }
 .proposal-changes strong {
-  font-size: 8px;
+  font-size: 10.5px;
   color: #59675d;
 }
 .proposal-changes small {
-  font-size: 8px;
+  font-size: 10.5px;
   color: #939c95;
 }
 .version-history-strip {
@@ -2880,11 +2924,11 @@ textarea:focus-visible {
   gap: 3px;
 }
 .version-history-strip strong {
-  font-size: 9px;
+  font-size: 10.5px;
   color: #516257;
 }
 .version-history-strip span {
-  font-size: 8px;
+  font-size: 10.5px;
   color: #96a198;
 }
 .version-chips {
@@ -2896,14 +2940,14 @@ textarea:focus-visible {
   background: #f3f5f2;
   border-radius: 4px;
   padding: 4px 6px;
-  font-size: 7px !important;
+  font-size: 10.5px !important;
 }
 .version-chips span.current {
   background: #e8f2e9;
   color: #4f805b;
 }
 .version-history-strip > small {
-  font-size: 8px;
+  font-size: 10.5px;
   color: #9ba49d;
   margin-left: 7px;
 }
@@ -3052,7 +3096,7 @@ textarea:focus-visible {
     padding: 13px;
   }
   .activity-detail-title h2 {
-    font-size: 13px;
+    font-size: 14.56px;
   }
   .activity-detail-record-count {
     margin-left: 57px;
@@ -3065,7 +3109,7 @@ textarea:focus-visible {
     padding: 10px;
   }
   .activity-metric-card strong {
-    font-size: 12px;
+    font-size: 13.44px;
   }
   .activity-chart-card {
     padding: 11px;
@@ -3082,7 +3126,7 @@ textarea:focus-visible {
   .activity-full-fit-json {
     max-height: 470px;
     padding: 10px;
-    font-size: 7px;
+    font-size: 10.5px;
   }
   .admin-role-pill {
     display: none;
@@ -3106,7 +3150,7 @@ textarea:focus-visible {
     height: 7px;
   }
   .crumb {
-    font-size: 10px;
+    font-size: 11.2px;
     gap: 7px;
   }
   .crumb strong {
@@ -3123,15 +3167,15 @@ textarea:focus-visible {
     align-items: flex-start;
   }
   .page-heading h1 {
-    font-size: 21px;
+    font-size: 23.52px;
   }
   .page-heading p {
-    font-size: 10px;
+    font-size: 11.2px;
     max-width: 300px;
     line-height: 1.5;
   }
   .plan-version-pill {
-    font-size: 8px;
+    font-size: 10.5px;
     padding: 7px;
     margin-top: 8px;
   }
@@ -3143,7 +3187,7 @@ textarea:focus-visible {
     max-width: 72%;
   }
   .hero-copy h2 {
-    font-size: 25px;
+    font-size: 28px;
   }
   .hero-copy p {
     max-width: 220px;
@@ -3168,7 +3212,7 @@ textarea:focus-visible {
     width: 15px;
   }
   .hero-stamp span {
-    font-size: 5px;
+    font-size: 10.5px;
   }
   .stat-grid {
     gap: 7px;
@@ -3189,16 +3233,16 @@ textarea:focus-visible {
   }
   .stat-label {
     position: static;
-    font-size: 8px;
+    font-size: 10.5px;
     line-height: 1.25;
     min-height: 19px;
   }
   .stat-value {
-    font-size: 14px;
+    font-size: 15.68px;
     margin-top: 4px;
   }
   .stat-detail {
-    font-size: 7px;
+    font-size: 10.5px;
     line-height: 1.4;
   }
   .mini-progress {
@@ -3216,7 +3260,7 @@ textarea:focus-visible {
   }
   .week-panel .panel-heading h3,
   .goal-panel .panel-heading h3 {
-    font-size: 13px;
+    font-size: 14.56px;
   }
   .week-preview {
     margin-top: 10px;
@@ -3226,13 +3270,13 @@ textarea:focus-visible {
   }
   .goal-date {
     margin-top: 12px;
-    font-size: 9px;
+    font-size: 10.5px;
   }
   .goal-countdown {
     margin-top: 12px;
   }
   .goal-countdown strong {
-    font-size: 19px;
+    font-size: 21.28px;
   }
   .bottom-actions {
     align-items: stretch;
@@ -3263,10 +3307,10 @@ textarea:focus-visible {
     align-items: center;
   }
   .proposal-copy h3 {
-    font-size: 12px;
+    font-size: 13.44px;
   }
   .proposal-copy p {
-    font-size: 9px;
+    font-size: 10.5px;
   }
   .proposal-changes {
     margin-top: 8px;
@@ -3310,12 +3354,12 @@ textarea:focus-visible {
     align-items: flex-start;
   }
   .schedule-top h2 {
-    font-size: 17px;
+    font-size: 19.04px;
     display: grid;
     gap: 3px;
   }
   .schedule-week-date {
-    font-size: 8px;
+    font-size: 10.5px;
   }
   .schedule-strip {
     margin-top: 12px;
@@ -3325,20 +3369,20 @@ textarea:focus-visible {
     gap: 5px;
   }
   .schedule-day > strong {
-    font-size: 12px;
+    font-size: 13.44px;
   }
   .schedule-day > i {
-    font-size: 5px;
+    font-size: 10.5px;
   }
   .schedule-date-group {
     grid-template-columns: 67px minmax(0, 1fr);
     gap: 6px;
   }
   .schedule-date-label strong {
-    font-size: 8px;
+    font-size: 10.5px;
   }
   .schedule-date-label span {
-    font-size: 7px;
+    font-size: 10.5px;
   }
   .schedule-list .session-pill {
     padding: 8px 7px;
@@ -3355,16 +3399,16 @@ textarea:focus-visible {
     width: 14px;
   }
   .session-info h4 {
-    font-size: 9px;
+    font-size: 10.5px;
   }
   .session-info p {
-    font-size: 8px;
+    font-size: 10.5px;
   }
   .session-metrics strong {
-    font-size: 8px;
+    font-size: 10.5px;
   }
   .session-metrics span {
-    font-size: 7px;
+    font-size: 10.5px;
   }
   .session-status-actions {
     gap: 2px;
@@ -3390,7 +3434,7 @@ textarea:focus-visible {
     padding: 14px;
   }
   .safety-note {
-    font-size: 8px;
+    font-size: 10.5px;
   }
   .profile-layout {
     gap: 9px;
@@ -3419,7 +3463,7 @@ textarea:focus-visible {
     gap: 3px;
   }
   .day-selector button > small {
-    font-size: 6px;
+    font-size: 10.5px;
   }
   .day-selector button {
     padding: 7px 1px;
@@ -3439,10 +3483,10 @@ textarea:focus-visible {
     min-height: 112px;
   }
   .import-copy h2 {
-    font-size: 15px;
+    font-size: 16.8px;
   }
   .format-tags small {
-    font-size: 6px;
+    font-size: 10.5px;
   }
   .preview-stats {
     grid-template-columns: 1fr 1fr;
@@ -3466,7 +3510,7 @@ textarea:focus-visible {
   .activity-date {
     grid-column: 1;
     grid-row: 2;
-    font-size: 7px;
+    font-size: 10.5px;
   }
   .activity-distance {
     grid-column: 2;
@@ -3477,7 +3521,7 @@ textarea:focus-visible {
     grid-column: 3;
     grid-row: 2;
     justify-self: center;
-    font-size: 7px;
+    font-size: 10.5px;
   }
   .activity-rpe {
     grid-column: 4;
@@ -3489,14 +3533,14 @@ textarea:focus-visible {
     height: 17px;
   }
   .activity-name strong {
-    font-size: 9px;
+    font-size: 10.5px;
   }
   .activity-name span {
-    font-size: 7px;
+    font-size: 10.5px;
   }
   .history-footnote {
     align-items: flex-start;
-    font-size: 7px;
+    font-size: 10.5px;
   }
   .history-import-count {
     font-size: 0;
@@ -3535,7 +3579,7 @@ textarea:focus-visible {
     align-items: center;
     gap: 9px;
     font-family: Manrope, sans-serif;
-    font-size: 17px;
+    font-size: 19.04px;
     margin-bottom: auto;
   }
   .auth-mobile-brand .brand-mark {
@@ -3551,7 +3595,7 @@ textarea:focus-visible {
     margin-bottom: 21px;
   }
   .auth-form-wrap h1 {
-    font-size: 25px;
+    font-size: 28px;
   }
   .auth-privacy {
     margin-top: 19px;
@@ -3563,3 +3607,150 @@ textarea:focus-visible {
     padding-top: 10px;
   }
 }
+.session-open-detail { padding: 0; border: 0; background: transparent; cursor: pointer; }
+.session-open-detail:disabled, .session-title-open:disabled { cursor: default; }
+.session-title-open { padding: 0; border: 0; background: transparent; color: #35423a; font: inherit; font-weight: 700; text-align: left; cursor: pointer; }
+.session-title-open:not(:disabled):hover { color: #477653; text-decoration: underline; }
+.session-fit-upload, .session-fit-attached { display: inline-flex; align-items: center; justify-content: center; gap: 4px; flex: none; color: #477653; font-size: 11.2px; font-weight: 700; cursor: pointer; }
+.session-fit-upload { position: relative; border: 1px solid #dce6dd; border-radius: 20px; padding: 5px 7px; background: white; }
+.session-fit-upload input, .session-detail-actions input { display: none; }
+.session-fit-upload.is-uploading { opacity: .6; cursor: progress; }
+.session-fit-attached { color: #568161; }
+.session-detail-backdrop { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 24px; background: #15231db3; }
+.session-detail-dialog { position: relative; width: min(900px, 100%); max-height: min(88vh, 900px); overflow: auto; padding: 36px 40px; }
+.session-detail-dialog h2 { margin: 9px 38px 4px 0; color: #2d4035; font-size: clamp(24px, 3.2vw, 34px); line-height: 1.2; }
+.session-detail-close { position: absolute; top: 17px; right: 17px; }
+.session-detail-date { margin: 8px 0 22px; color: #748178; font-size: 15.68px; }
+.session-detail-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 20px 0 24px; }
+.session-detail-stats span { display: grid; gap: 5px; padding: 13px; border-radius: 9px; background: #f6f8f5; }
+.session-detail-stats small { color: #87938b; font-size: 11.2px; font-weight: 700; letter-spacing: .06em; }
+.session-detail-stats strong { color: #3d5547; font-size: 15.68px; }
+.session-detail-description { padding: 22px; border: 1px solid #e9eee9; border-radius: 11px; background: #fbfcfa; color: #47574d; font-size: 17.92px; line-height: 1.8; white-space: pre-wrap; }
+.session-detail-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 20px; }
+.session-detail-actions label { cursor: pointer; }
+.session-fit-confirmation { display: flex; align-items: center; gap: 6px; color: #477653; font-size: 14.56px; }
+@media (max-width: 640px) {
+  .session-detail-backdrop { padding: 10px; }
+  .session-detail-dialog { padding: 27px 18px 20px; max-height: 94vh; }
+  .session-detail-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .session-detail-description { padding: 15px; font-size: 15.68px; line-height: 1.7; }
+  .session-detail-actions { justify-content: stretch; }
+  .session-detail-actions .button { flex: 1; justify-content: center; }
+}
+
+/* Rompesuelas brand refresh */
+:root {
+  --green: #28664e;
+  --green-dark: #194936;
+  --green-pale: #eff6d7;
+  --orange: #f17b61;
+  --paper: #fffdf7;
+  --line: #e9e6da;
+  --shadow: 0 14px 34px rgba(41, 55, 39, .075);
+  color: #25352f;
+  background: #f8f5ec;
+}
+body {
+  color: #25352f;
+  background-color: #f8f5ec;
+  background-image: radial-gradient(ellipse at 92% 5%, rgba(213, 241, 111, .17), transparent 28%), radial-gradient(ellipse at 9% 76%, rgba(241, 123, 97, .09), transparent 30%);
+  font-family: "DM Sans", "Aptos", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
+}
+.sidebar {
+  background: rgba(255, 254, 249, .96);
+  border-right-color: #e8e4d8;
+  box-shadow: 7px 0 28px rgba(39, 54, 43, .035);
+}
+.brand-mark {
+  border-radius: 14px 14px 14px 5px;
+  background: linear-gradient(145deg, #f17b61 0%, #df664f 45%, #28664e 46%, #28664e 100%);
+  color: #f8f7df;
+  box-shadow: 0 7px 16px rgba(40, 102, 78, .23);
+  letter-spacing: -1.5px;
+}
+.brand-name,
+.auth-art-top > span,
+.auth-mobile-brand b {
+  color: #243b31;
+  letter-spacing: -1px;
+}
+.brand-label { color: #829182; letter-spacing: 1.1px; }
+.sidebar-caption { color: #849080; }
+.nav-button {
+  border-radius: 11px;
+  color: #66776c;
+  transition: background .18s ease, color .18s ease, transform .18s ease;
+}
+.nav-button:hover { background: #f4f5e9; color: #28664e; transform: translateX(2px); }
+.nav-button.active {
+  background: linear-gradient(100deg, #edf5d0, #f4f7e5);
+  color: #285941;
+  box-shadow: inset 3px 0 #ee8065;
+}
+.coach-card { background: linear-gradient(135deg, #f3f6df, #fff6e9); border-color: #e9ead7; border-radius: 13px; }
+.coach-icon { background: #e7f0bd; color: #56733d; }
+.account-row { border-top-color: #e9e6da; }
+.avatar, .top-avatar { background: #f3b09b; color: #743e31; }
+.main-area { background: transparent; }
+.topbar {
+  background: rgba(248, 245, 236, .9);
+  border-bottom-color: rgba(227, 223, 209, .8);
+}
+.crumb { color: #829083; }
+.crumb strong { color: #30483a; }
+.local-indicator > span { background: #b3d547; box-shadow: 0 0 0 4px #edf4d8; }
+.page-heading h1 { color: #243a30; font-size: 30px; letter-spacing: -1.1px; }
+.page-heading p { color: #738177; }
+.eyebrow { color: #73856d; letter-spacing: 1.25px; }
+.hero-card {
+  border-radius: 19px;
+  background: linear-gradient(112deg, #19483d 0%, #28664e 54%, #40765a 100%);
+  box-shadow: 0 18px 36px rgba(30, 77, 59, .2);
+}
+.hero-card::before {
+  content: "";
+  position: absolute;
+  width: 190px;
+  height: 190px;
+  right: 15%;
+  bottom: -145px;
+  border: 22px solid rgba(213, 241, 111, .14);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.hero-kicker { color: #e0efbe; }
+.hero-kicker-dot { background: #d5f16f; box-shadow: 0 0 0 4px #d5f16f26; }
+.hero-copy h2 { font-size: 34px; letter-spacing: -1.4px; }
+.hero-copy h2 em { color: #d8f17d; }
+.hero-copy p { color: #e0e9db; }
+.hero-stamp { color: #e0f08a; border-color: #d5f16f77; }
+.route-point { background: #f17b61; }
+.route-label { color: #e4efae; }
+.stat-card, .panel {
+  border-color: #e9e7dd;
+  border-radius: 15px;
+  box-shadow: 0 6px 18px rgba(42, 57, 43, .045);
+}
+.stat-card { transition: transform .2s ease, box-shadow .2s ease; }
+.stat-card:hover { transform: translateY(-3px); box-shadow: 0 12px 24px rgba(42, 57, 43, .09); }
+.stat-icon.orange { background: #fff0e6; color: #d8634b; }
+.stat-icon.green { background: #eef5d9; color: #4c783a; }
+.stat-icon.blue { background: #edf0fa; color: #6b70a4; }
+.mini-progress span { background: linear-gradient(90deg, #b7d64c, #5e9d65); }
+.button { min-height: 42px; border-radius: 11px; font-weight: 700; }
+.button-primary { background: linear-gradient(135deg, #347554, #245b45); box-shadow: 0 5px 12px rgba(40, 102, 78, .14); }
+.button-primary:hover:not(:disabled) { background: linear-gradient(135deg, #28664e, #194936); box-shadow: 0 8px 17px rgba(40, 102, 78, .2); }
+.button-outline { border-color: #d8dfca; color: #3c634b; border-radius: 11px; }
+.button-light { color: #314d3c; }
+input:not([type="checkbox"]):not([type="radio"]), select, textarea { border-radius: 10px; }
+input:not([type="checkbox"]):not([type="radio"]):focus, select:focus, textarea:focus { border-color: #84aa5b; box-shadow: 0 0 0 4px rgba(190, 218, 111, .2); }
+.schedule-day { border-radius: 13px; transition: transform .18s ease, box-shadow .18s ease; }
+.schedule-day:hover { transform: translateY(-2px); box-shadow: 0 7px 14px rgba(40, 68, 44, .08); }
+.schedule-day.selected { background: #eff6d7; border-color: #cddd91; }
+.session-pill { border-radius: 12px; border-color: #ecebe2; }
+.session-pill:hover { border-color: #cbd9a7; box-shadow: 0 5px 15px rgba(40, 68, 44, .06); }
+.plan-version-pill, .count-pill, .version-history-strip { border-radius: 12px; }
+.toast { border-radius: 12px; }
+.readiness-dialog, .session-detail-dialog { border-radius: 20px; }
+.activity-row-clickable:hover { background: #f5f7e9; }
+.session-title-open:not(:disabled):hover { color: #d4624c; }

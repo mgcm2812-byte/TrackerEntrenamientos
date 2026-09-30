@@ -49,8 +49,23 @@ type Session = {
   details: string;
   status: string;
   adaptation?: string;
+  safetyAction?: string;
+  readiness?: Record<string, boolean>;
+  readinessAt?: string;
+  activityId?: number;
+  activityFileName?: string;
+  activityDate?: string;
+  load?: { cardiovascular: number; impact: number; neuromuscular: number; strength: number };
 };
 type Plan = {
+  algorithmVersion: string;
+  rulesetVersion: string;
+  rulesReviewed?: string;
+  athleteLevel?: number;
+  goalAssessment?: { classification: string; reasons: string[]; predictedTimeMin?: number | null; predictedRangeMin?: {lower:number;central:number;upper:number}|null; alternatives?: string[] };
+  warnings?: string[];
+  decisions?: { code: string; ruleId: string; reason: string }[];
+  runningMetric?: string;
   version: number;
   createdAt: string;
   previousVersion?: number;
@@ -69,6 +84,24 @@ type Profile = {
   weeklyKm: string;
   longestRunKm: string;
   recent5kMin: string;
+  recent5kDate: string;
+  runningExperienceMonths: string;
+  strengthExperienceMonths: string;
+  currentWeeklyRuns: string;
+  currentWeeklyMinutes: string;
+  longestRunMinutes: string;
+  continuousRunMinutes: string;
+  weeksSinceTraining: string;
+  canWalk30Minutes: boolean;
+  painWhileWalking: boolean;
+  maxSessionMinutes: string;
+  preferredRunningMetric: string;
+  trainingPriority: string;
+  gymAccess: boolean;
+  healthScreening: Record<string, boolean>;
+  healthScreeningReviewed: boolean;
+  precautionScreening: Record<string, boolean>;
+  recoveryProfile: { sleepHours: string; sleepQuality: string; stress: string; physicalWork?: boolean; frequentTravel?: boolean };
   trainingSchedule: DayTraining[];
   limitations: string;
   preferences: string;
@@ -78,11 +111,15 @@ type DayTraining = {
   treadmill: boolean;
   street: boolean;
   longRun: boolean;
+  maxSessionMinutes?: string | number;
 };
 type Goal = {
   distanceKm: number;
   raceDate: string;
   targetTimeMin: number | string | null;
+  priority?: string;
+  terrain?: string;
+  elevationGainM?: number | string;
 };
 type ActivityLog = {
   id?: number;
@@ -97,8 +134,16 @@ type ActivityLog = {
   maxHeartRate?: number | null;
   rpe: number | string | null;
   soreness: string;
+  painWorsening?: boolean;
+  painChangesGait?: boolean;
+  illness?: boolean;
+  poorSleep?: boolean;
+  fatigueHigh?: boolean;
   note: string;
   createdAt?: string;
+  sessionId?: string;
+  sessionName?: string;
+  planVersion?: number;
   fitData?: Record<string, unknown>;
 };
 type AppData = {
@@ -111,6 +156,7 @@ type AppData = {
     id: number;
     reason: string;
     planVersion: number;
+    weeklyReview?: { plannedSessions: number; completedSessions: number; plannedDurationMinutes?: number; completedDurationMinutes?: number; plannedLoad?: number; completedLoad?: number; breakDays?: number };
     plan: Plan;
   };
 };
@@ -138,7 +184,30 @@ const emptyDayTraining: DayTraining = {
   treadmill: false,
   street: false,
   longRun: false,
+  maxSessionMinutes: "90",
 };
+const healthQuestions = [
+  ["chestPain", "Dolor o presión torácica durante el esfuerzo"],
+  ["fainting", "Desmayo o pérdida de conciencia"],
+  ["unusualBreathlessness", "Falta de aire desproporcionada o inexplicable"],
+  ["palpitationsWithSymptoms", "Palpitaciones con mareo o malestar"],
+  ["heartConditionWithoutClearance", "Enfermedad cardiovascular sin autorización para entrenar"],
+  ["acutePainChangesGait", "Dolor agudo que altera la marcha"],
+  ["cannotBearWeight", "Incapacidad para apoyar peso"],
+  ["majorSwelling", "Inflamación importante tras una lesión"],
+  ["fever", "Fiebre o febrícula"],
+  ["neurologicalSymptoms", "Síntomas neurológicos recientes"],
+  ["recentSurgeryWithoutClearance", "Cirugía reciente sin alta para ejercicio"],
+  ["progressivePain", "Dolor que empeora progresivamente durante varios días"],
+] as const;
+const precautionQuestions = [
+  ["recurrentInjury", "Lesión previa recurrente"],
+  ["recentIllness", "Regreso reciente tras enfermedad"],
+  ["diabetesOrHypertension", "Diabetes o hipertensión"],
+  ["respiratoryCondition", "Enfermedad respiratoria"],
+  ["pregnancyOrPostpartum", "Embarazo o posparto"],
+  ["heartRateMedication", "Medicación que afecta a la frecuencia cardiaca"],
+] as const;
 const defaultProfile: Profile = {
   name: "",
   age: "",
@@ -148,6 +217,24 @@ const defaultProfile: Profile = {
   weeklyKm: "12",
   longestRunKm: "6",
   recent5kMin: "",
+  recent5kDate: "",
+  runningExperienceMonths: "0",
+  strengthExperienceMonths: "0",
+  currentWeeklyRuns: "0",
+  currentWeeklyMinutes: "0",
+  longestRunMinutes: "0",
+  continuousRunMinutes: "0",
+  weeksSinceTraining: "0",
+  canWalk30Minutes: true,
+  painWhileWalking: false,
+  maxSessionMinutes: "90",
+  preferredRunningMetric: "time",
+  trainingPriority: "balanced",
+  gymAccess: true,
+  healthScreening: {},
+  healthScreeningReviewed: false,
+  precautionScreening: {},
+  recoveryProfile: { sleepHours: "7", sleepQuality: "3", stress: "2", physicalWork: false, frequentTravel: false },
   trainingSchedule: [
     { ...emptyDayTraining, street: true },
     { ...emptyDayTraining },
@@ -175,6 +262,9 @@ function normalizedProfile(value: Profile | null): Profile {
     return {
       ...defaultProfile,
       ...storedProfile,
+      healthScreening: { ...defaultProfile.healthScreening, ...storedProfile.healthScreening },
+      precautionScreening: { ...defaultProfile.precautionScreening, ...storedProfile.precautionScreening },
+      recoveryProfile: { ...defaultProfile.recoveryProfile, ...storedProfile.recoveryProfile },
       trainingSchedule: (() => {
         let longRunAssigned = false;
         return Array.from({ length: 7 }, (_, day) => {
@@ -188,6 +278,7 @@ function normalizedProfile(value: Profile | null): Profile {
             treadmill: Boolean(stored.treadmill),
             street: Boolean(stored.street),
             longRun,
+            maxSessionMinutes: String(stored.maxSessionMinutes || storedProfile.maxSessionMinutes || "90"),
           };
         });
       })(),
@@ -260,7 +351,7 @@ const viewMeta: Record<View, { title: string; subtitle: string }> = {
   },
   admin: {
     title: "Administración",
-    subtitle: "Gestiona las cuentas registradas en Stride.",
+    subtitle: "Gestiona las cuentas registradas en Rompesuelas.",
   },
   "activity-detail": {
     title: "Detalle de actividad",
@@ -323,7 +414,7 @@ function formatDistance(distance?: number | null) {
 }
 function goalName(goal?: Goal | null) {
   return goal
-    ? `${goal.distanceKm === 21.1 ? "Media maratón" : `${goal.distanceKm}K`}`
+    ? `${goal.distanceKm >= 42 ? "Maratón" : goal.distanceKm >= 21 ? "Media maratón" : goal.distanceKm === 1.609 ? "Milla" : `${goal.distanceKm}K`}`
     : "Tu próxima meta";
 }
 function firstName(name?: string) {
@@ -404,7 +495,7 @@ export default function App() {
   if (authenticated === null)
     return (
       <div className="loading-screen">
-        <div className="brand-mark">S</div>
+        <div className="brand-mark">R</div>
         <p>Preparando tu espacio...</p>
       </div>
     );
@@ -464,10 +555,10 @@ export default function App() {
       )}
       <aside className={`sidebar ${mobileOpen ? "is-open" : ""}`}>
         <div className="brand">
-          <div className="brand-mark">S</div>
+          <div className="brand-mark">R</div>
           <div>
-            <span className="brand-name">stride</span>
-            <span className="brand-label">HYBRID COACH</span>
+            <span className="brand-name">Rompesuelas</span>
+            <span className="brand-label">RUN CLUB · PLANES HÍBRIDOS</span>
           </div>
           <button
             className="icon-button sidebar-close"
@@ -561,7 +652,7 @@ export default function App() {
               <Menu size={20} />
             </button>
             <div className="crumb">
-              <span>Stride</span>
+              <span>Rompesuelas</span>
               <span className="crumb-slash">/</span>
               <strong>{viewMeta[view].title}</strong>
             </div>
@@ -589,7 +680,7 @@ export default function App() {
               <div className="eyebrow">
                 {view === "overview"
                   ? "TU CENTRO DE ENTRENAMIENTO"
-                  : "STRIDE / PERSONAL"}
+                  : "ROMPESUELAS / PERSONAL"}
               </div>
               <h1>{viewMeta[view].title}</h1>
               <p>{viewMeta[view].subtitle}</p>
@@ -704,9 +795,9 @@ function AdminWorkspace({
     <div className="app-shell admin-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">S</div>
+          <div className="brand-mark">R</div>
           <div>
-            <span className="brand-name">stride</span>
+            <span className="brand-name">Rompesuelas</span>
             <span className="brand-label">ADMINISTRACIÓN</span>
           </div>
         </div>
@@ -740,7 +831,7 @@ function AdminWorkspace({
       <main className="main-area">
         <header className="topbar">
           <div className="crumb">
-            <span>Stride</span>
+            <span>Rompesuelas</span>
             <span className="crumb-slash">/</span>
             <strong>Administración</strong>
           </div>
@@ -759,7 +850,7 @@ function AdminWorkspace({
             <div>
               <div className="eyebrow">{adminSection === "users" ? "MANTENIMIENTO DE CUENTAS" : "CONFIGURACIÓN DE PLANES"}</div>
               <h1>{adminSection === "users" ? "Administración de usuarios" : "Entrenamiento de fuerza"}</h1>
-              <p>{adminSection === "users" ? "Gestiona accesos y datos de los usuarios de Stride." : "Define la división y los ejercicios disponibles para elaborar los planes."}</p>
+              <p>{adminSection === "users" ? "Gestiona accesos y datos de los usuarios de Rompesuelas." : "Define la división y los ejercicios disponibles para elaborar los planes."}</p>
             </div>
           </div>
           {notice && (
@@ -859,8 +950,8 @@ function LoginScreen({
     <div className="auth-page">
       <div className="auth-art">
         <div className="auth-art-top">
-          <div className="brand-mark">S</div>
-          <span>stride</span>
+          <div className="brand-mark">R</div>
+          <span>Rompesuelas</span>
         </div>
         <div className="art-rings">
           <span />
@@ -885,8 +976,8 @@ function LoginScreen({
       </div>
       <div className="auth-main">
         <div className="auth-mobile-brand">
-          <div className="brand-mark">S</div>
-          <b>stride</b>
+          <div className="brand-mark">R</div>
+          <b>Rompesuelas</b>
         </div>
         <div className="auth-form-wrap">
           <div className="auth-lock">
@@ -1149,6 +1240,7 @@ function Dashboard({
             <div className="eyebrow">REEVALUACIÓN DISPONIBLE</div>
             <h3>Una semana más inteligente.</h3>
             <p>{data.proposal.reason}</p>
+            {data.proposal.weeklyReview && <div className="weekly-review-metrics"><span>Sesiones completadas <strong>{data.proposal.weeklyReview.completedSessions}/{data.proposal.weeklyReview.plannedSessions}</strong></span><span>Minutos realizados <strong>{data.proposal.weeklyReview.completedDurationMinutes ?? 0}/{data.proposal.weeklyReview.plannedDurationMinutes ?? 0}</strong></span>{data.proposal.weeklyReview.breakDays ? <span>Interrupción <strong>{data.proposal.weeklyReview.breakDays} días</strong></span> : null}</div>}
             {data.proposal.plan.sessions.filter((s) => s.adaptation).length >
               0 && (
               <div className="proposal-changes">
@@ -1374,30 +1466,37 @@ function SessionPill({
   session,
   compact = false,
   onStatus,
+  onReadiness,
+  onOpenDetails,
+  onUploadFit,
+  fitBusy = false,
 }: {
   session: Session;
   compact?: boolean;
   onStatus?: (status: "completed" | "skipped") => void;
+  onReadiness?: (readiness: Record<string, boolean>) => void;
+  onOpenDetails?: () => void;
+  onUploadFit?: (file: File) => void;
+  fitBusy?: boolean;
 }) {
   const today = session.date === todayISO();
+  const [readinessOpen, setReadinessOpen] = useState(false);
+  const [readiness, setReadiness] = useState<Record<string, boolean>>({});
+  const readinessQuestions = [["poorSleep","Dormí mal"],["fatigueHigh","Fatiga superior a la habitual"],["stressHigh","Estrés elevado"],["muscleSorenessHigh","Agujetas importantes"],["localizedPain","Tengo dolor localizado"],["painWorsening","El dolor empeora al moverme"],["changesGait","El dolor altera mi marcha"],["illness","Fiebre o enfermedad"],["chestPain","Dolor torácico"],["dizziness","Mareo"],["unusualBreathlessness","Falta de aire inusual"]];
   return (
     <article
       className={`session-pill session-${session.type} ${today ? "is-today" : ""} ${session.status === "completed" ? "is-complete" : ""} ${session.status === "skipped" ? "is-skipped" : ""} ${compact ? "is-compact" : ""}`}
     >
-      <div className="session-date-block">
-        <span>
-          {compact
-            ? dayShort[(new Date(`${session.date}T12:00:00`).getDay() + 6) % 7]
-            : prettyDate(session.date, { weekday: "short" })}
-        </span>
+      <button type="button" disabled={!onOpenDetails} className="session-date-block session-open-detail" onClick={onOpenDetails} title="Abrir detalle del entrenamiento" aria-label={`Ver entrenamiento ${session.title} del ${prettyDate(session.date)}`}>
+        <span>{compact ? dayShort[(new Date(`${session.date}T12:00:00`).getDay() + 6) % 7] : prettyDate(session.date, { weekday: "short" })}</span>
         <strong>{new Date(`${session.date}T12:00:00`).getDate()}</strong>
-      </div>
+      </button>
       <div className="session-icon">
         <SessionIcon type={session.type} />
       </div>
       <div className="session-info">
         <div className="session-title-row">
-          <h4>{session.title}</h4>
+          <button type="button" disabled={!onOpenDetails} className="session-title-open" onClick={onOpenDetails}>{session.title}</button>
           {today && <span className="today-tag">HOY</span>}
           {session.status === "completed" && (
             <span className="completed-tag">
@@ -1418,6 +1517,7 @@ function SessionPill({
           {session.phase && ` · ${session.phase}`}
         </span>
         {!compact && <p>{session.details}</p>}
+      {session.safetyAction && <p className="session-safety-message">{session.safetyAction}</p>}
       </div>
       <div className="session-metrics">
         <strong>
@@ -1431,24 +1531,18 @@ function SessionPill({
             : session.effort.split("·")[0].trim()}
         </span>
       </div>
-      {onStatus && session.status === "pending" && (
+      {(onStatus || onUploadFit || session.activityId) && (
         <div className="session-status-actions">
-          <button
-            className="session-complete"
-            title="Marcar como completada"
-            onClick={() => onStatus("completed")}
-          >
-            <Check size={15} />
-          </button>
-          <button
-            className="session-skip"
-            title="Marcar como omitida"
-            onClick={() => onStatus("skipped")}
-          >
-            <X size={14} />
-          </button>
+          {onUploadFit && !session.activityId && <label className={`session-fit-upload ${fitBusy ? "is-uploading" : ""}`} title="Adjuntar archivo FIT a esta sesión"><FileUp size={14} /><span>{fitBusy ? "Subiendo" : "FIT"}<input type="file" accept=".fit,application/octet-stream" disabled={fitBusy} onChange={(e) => { const file=e.currentTarget.files?.[0]; if(file) onUploadFit(file); e.currentTarget.value=""; }} /></span></label>}
+          {session.activityId && <span className="session-fit-attached" title={session.activityFileName || "Archivo FIT asociado"}><Check size={11} /> FIT</span>}
+          {onStatus && session.status === "pending" && <>
+            {onReadiness && <button className="session-readiness" title="Evaluar cómo te encuentras antes de entrenar" onClick={() => setReadinessOpen(true)}><HeartPulse size={15} /></button>}
+            <button className="session-complete" title="Marcar como completada" onClick={() => session.date >= todayISO() && (!session.readinessAt || new Date(session.readinessAt).toDateString() !== new Date().toDateString()) ? setReadinessOpen(true) : onStatus("completed")}><Check size={15} /></button>
+            <button className="session-skip" title="Marcar como omitida" onClick={() => onStatus("skipped")}><X size={14} /></button>
+          </>}
         </div>
       )}
+      {readinessOpen && <div className="readiness-backdrop" role="presentation" onClick={() => setReadinessOpen(false)}><section className="panel readiness-dialog" role="dialog" aria-modal="true" aria-labelledby={`readiness-${session.id}`} onClick={(e) => e.stopPropagation()}><button className="icon-button readiness-close" aria-label="Cerrar" onClick={() => setReadinessOpen(false)}><X size={17} /></button><div className="eyebrow">ANTES DE ENTRENAR</div><h3 id={`readiness-${session.id}`}>¿Cómo te encuentras hoy?</h3><p>Marca lo que aplique. El sistema ajustará o cancelará la sesión según estas señales.</p><div className="strength-exercise-grid screening-grid">{readinessQuestions.map(([key,label]) => <label className="strength-exercise-option" key={key}><input type="checkbox" checked={Boolean(readiness[key])} onChange={() => setReadiness((current) => ({...current,[key]:!current[key]}))} />{label}</label>)}</div><div className="form-actions"><button className="button button-outline" onClick={() => setReadinessOpen(false)}>Volver</button><button className="button button-primary" onClick={() => { onReadiness?.(readiness); setReadinessOpen(false); setReadiness({}); }}>Evaluar y ajustar <HeartPulse size={15} /></button></div></section></div>}
     </article>
   );
 }
@@ -1508,7 +1602,22 @@ function PlanView({
   refresh: () => Promise<void>;
 }) {
   const [week, setWeek] = useState(1);
+  const [selectedSession, setSelectedSession] = useState<Session | null>(null);
+  const [fitUploadingId, setFitUploadingId] = useState<string | null>(null);
   const plan = data.plan;
+  async function uploadSessionFit(session: Session, file: File) {
+    setFitUploadingId(session.id);
+    const result = await runAction(
+      async () => api<{ ok: boolean; activityId: number }>(`/api/sessions/${encodeURIComponent(session.id)}/fit?filename=${encodeURIComponent(file.name)}`, {
+        method: "POST",
+        body: file,
+        headers: { "Content-Type": "application/octet-stream" },
+      }),
+      "Archivo FIT asociado a la sesión y añadido al historial.",
+    );
+    setFitUploadingId(null);
+    if (result) await refresh();
+  }
   useEffect(() => {
     if (plan) setWeek(Math.min(Math.max(1, week), plan.weeks));
   }, [plan?.version, plan?.weeks]);
@@ -1540,6 +1649,7 @@ function PlanView({
   const runKm = sessions
     .filter((s) => s.type === "run")
     .reduce((sum, s) => sum + (s.distanceKm || 0), 0);
+  const runMinutes = sessions.filter((s) => s.type === "run").reduce((sum,s)=>sum+(s.durationMin||0),0);
   const phase = sessions[0]?.phase || "Recuperación";
   return (
     <>
@@ -1557,10 +1667,10 @@ function PlanView({
           </span>
         </div>
         <div className="plan-summary-stat">
-          <span>CARRERA ESTA SEMANA</span>
+          <span>{plan.runningMetric === "distance" ? "CARRERA ESTA SEMANA" : "TIEMPO DE CARRERA"}</span>
           <strong>
-            {runKm.toLocaleString("es-ES", { maximumFractionDigits: 1 })}{" "}
-            <small>km</small>
+            {plan.runningMetric === "distance" ? runKm.toLocaleString("es-ES", { maximumFractionDigits: 1 }) : runMinutes}{" "}
+            <small>{plan.runningMetric === "distance" ? "km" : "min"}</small>
           </strong>
         </div>
         <div className="plan-summary-stat">
@@ -1582,6 +1692,12 @@ function PlanView({
           </div>
         </div>
       )}
+      <section className="panel algorithm-summary-panel">
+        <div className="algorithm-summary-heading"><div><div className="eyebrow">MOTOR DETERMINISTA</div><strong>{plan.algorithmVersion || "RUN-HYBRID-1.0.0"} · reglas {plan.rulesetVersion || "2026.1"}</strong>{plan.rulesReviewed && <small className="rules-reviewed-label">Reglas revisadas · {plan.rulesReviewed}</small>}</div><span className="algorithm-level-pill">Nivel {plan.athleteLevel ?? "—"}</span></div>
+        {plan.goalAssessment && <div className="goal-assessment"><strong>Objetivo: {plan.goalAssessment.classification}</strong>{plan.goalAssessment.predictedRangeMin && <span>Predicción orientativa para {formatDistance(plan.goal.distanceKm)} · {plan.goalAssessment.predictedRangeMin.lower}–{plan.goalAssessment.predictedRangeMin.upper} min</span>}{plan.goalAssessment.reasons.map((reason)=><p key={reason}>{reason}</p>)}{plan.goalAssessment.alternatives?.map((alternative)=><span className="goal-alternative" key={alternative}>{alternative}</span>)}</div>}
+        {plan.warnings?.map((warning)=><p className="algorithm-warning" key={warning}><CircleHelp size={15}/>{warning}</p>)}
+      </section>
+      <section className="panel plan-load-panel"><div><div className="eyebrow">CARGA COMBINADA</div><strong>Estimación comparativa · no es una medición biomecánica</strong></div><div className="plan-load-metrics">{([['cardiovascular','Cardiovascular'],['impact','Impacto'],['neuromuscular','Neuromuscular'],['strength','Fuerza']] as const).map(([key,label])=><span key={key}><small>{label}</small><b>{sessions.reduce((sum,session)=>sum+Number(session.load?.[key]||0),0).toLocaleString("es-ES")}</b></span>)}</div></section>
       {data.planVersions.length > 1 && (
         <div className="version-history-strip">
           <History size={16} />
@@ -1658,6 +1774,10 @@ function PlanView({
                 key={date}
                 className={`schedule-day ${selected ? "selected" : ""} ${session ? `scheduled-${session.type}` : ""}`}
                 onClick={() => {
+                  if (session) {
+                    setSelectedSession(session);
+                    return;
+                  }
                   const el = document.getElementById(`date-${date}`);
                   el?.scrollIntoView({ behavior: "smooth", block: "center" });
                 }}
@@ -1697,6 +1817,13 @@ function PlanView({
                     <SessionPill
                       key={item.id}
                       session={item}
+                      onOpenDetails={() => setSelectedSession(item)}
+                      onUploadFit={(file) => void uploadSessionFit(item, file)}
+                      fitBusy={fitUploadingId === item.id}
+                      onReadiness={(readiness) => void runAction(async () => {
+                        await api(`/api/sessions/${encodeURIComponent(item.id)}`, { method: "PATCH", body: JSON.stringify({ readiness }) });
+                        await refresh();
+                      }, "Preparación evaluada y sesión revisada.")}
                       onStatus={(status) =>
                         void runAction(
                           async () => {
@@ -1752,7 +1879,25 @@ function PlanView({
           ))}
         </section>
       </div>
+      {selectedSession && (() => {
+        const session=plan.sessions.find((item)=>item.id===selectedSession.id) || selectedSession;
+        return <div className="session-detail-backdrop" role="presentation" onClick={() => setSelectedSession(null)}><section className="panel session-detail-dialog" role="dialog" aria-modal="true" aria-labelledby={`session-detail-${session.id}`} onClick={(e)=>e.stopPropagation()}>
+          <button className="icon-button session-detail-close" aria-label="Cerrar detalle" onClick={()=>setSelectedSession(null)}><X size={18}/></button>
+          <div className="eyebrow">SEMANA {session.week} · {session.phase}</div>
+          <h2 id={`session-detail-${session.id}`}>{session.title}</h2>
+          <p className="session-detail-date">{prettyDate(session.date,{weekday:"long",day:"numeric",month:"long",year:"numeric"})} · {session.type==="strength"?"Fuerza":session.type==="race"?"Competición":"Carrera"}</p>
+          <div className="session-detail-stats"><span><small>DURACIÓN</small><strong>{formatMinutes(session.durationMin)}</strong></span><span><small>DISTANCIA</small><strong>{formatDistance(session.distanceKm)}</strong></span><span><small>ESFUERZO</small><strong>{session.effort}</strong></span><span><small>ESTADO</small><strong>{session.status==="completed"?"Completada":session.status==="skipped"?"Omitida":"Pendiente"}</strong></span></div>
+          <div className="session-detail-description">{session.details}</div>
+          {session.safetyAction && <p className="session-safety-message">{session.safetyAction}</p>}
+          {session.activityId && <p className="session-fit-confirmation"><Check size={15}/> FIT asociado: {session.activityFileName || "archivo cargado"}{session.activityDate?` · actividad del ${prettyDate(session.activityDate)}`:""}. También está en tu historial.</p>}
+          <div className="session-detail-actions">
+            {!session.activityId && <label className={`button button-outline ${fitUploadingId===session.id?"is-uploading":""}`}><FileUp size={15}/>{fitUploadingId===session.id?"Subiendo FIT…":"Adjuntar archivo FIT"}<input type="file" accept=".fit,application/octet-stream" disabled={fitUploadingId===session.id} onChange={(e)=>{const file=e.currentTarget.files?.[0];if(file)void uploadSessionFit(session,file);e.currentTarget.value="";}}/></label>}
+            <button className="button button-primary" onClick={()=>setSelectedSession(null)}>Cerrar</button>
+          </div>
+        </section></div>;
+      })()}
       <PlanTip />
+      <details className="decision-log"><summary>Registro de decisiones · {plan.decisions?.length || 0} reglas</summary>{plan.decisions?.map((decision,index)=><div className="decision-log-row" key={`${decision.ruleId}-${index}`}><strong>{decision.code}</strong><small>{decision.ruleId}</small><p>{decision.reason}</p></div>)}</details>
     </>
   );
 }
@@ -1808,6 +1953,11 @@ function HistoryView({
       ...preview,
       rpe: form.get("rpe"),
       soreness: form.get("soreness"),
+      painWorsening: form.has("painWorsening"),
+      painChangesGait: form.has("painChangesGait"),
+      illness: form.has("illness"),
+      poorSleep: form.has("poorSleep"),
+      fatigueHigh: form.has("fatigueHigh"),
       note: form.get("note"),
     };
     const result = await runAction(
@@ -1947,6 +2097,13 @@ function HistoryView({
                   <option value="Intensa">Sí, intensa</option>
                 </select>
               </Field>
+              <div className="strength-exercise-grid screening-grid activity-readiness-fields">
+                <label className="strength-exercise-option"><input type="checkbox" name="painWorsening" />El dolor empeoró durante la actividad</label>
+                <label className="strength-exercise-option"><input type="checkbox" name="painChangesGait" />El dolor alteró mi marcha o técnica</label>
+                <label className="strength-exercise-option"><input type="checkbox" name="illness" />Tuve fiebre o enfermedad</label>
+                <label className="strength-exercise-option"><input type="checkbox" name="poorSleep" />Dormí mal</label>
+                <label className="strength-exercise-option"><input type="checkbox" name="fatigueHigh" />Fatiga superior a la habitual</label>
+              </div>
               <Field label="Notas de sensaciones" full>
                 <textarea
                   name="note"
@@ -2013,13 +2170,13 @@ function HistoryView({
                   </div>
                   <div>
                     <strong>
-                      {a.type === "strength"
+                      {a.sessionName || (a.type === "strength"
                         ? "Entrenamiento de fuerza"
                         : a.type === "other"
                           ? "Otra actividad"
                           : a.source
                             ? `Carrera · ${a.source}`
-                            : "Carrera"}
+                            : "Carrera")}
                     </strong>
                     {a.source?.toUpperCase() === "FIT" && (
                       <span className="activity-view-badge">
@@ -2179,7 +2336,7 @@ function ActivityDetailView({
   if (loading)
     return (
       <div className="panel activity-detail-loading">
-        <div className="brand-mark">S</div>
+        <div className="brand-mark">R</div>
         <p>Cargando todos los datos de la actividad…</p>
       </div>
     );
@@ -2322,7 +2479,7 @@ function ActivityDetailView({
           <div className="eyebrow">
             DETALLE COMPLETO · {activity.source || "ACTIVIDAD"}
           </div>
-          <h2>{activity.filename || "Actividad"}</h2>
+          <h2>{activity.sessionName || activity.filename || "Actividad"}</h2>
           <p>
             {dateLabel}
             {sport ? ` · ${fitLabel(String(sport))}` : ""}
@@ -2669,16 +2826,12 @@ function ProfileView({
   refresh: () => Promise<void>;
 }) {
   const [form, setForm] = useState<Profile>(() => normalizedProfile(current));
-  const [goalForm, setGoalForm] = useState<Goal>({
-    distanceKm: 5,
-    raceDate: "",
-    targetTimeMin: "",
-  });
+  const [goalForm, setGoalForm] = useState<Goal>({ distanceKm: 5, raceDate: "", targetTimeMin: "", priority: "finish_healthy", terrain: "road", elevationGainM: "" });
   useEffect(() => {
     setForm(normalizedProfile(current));
   }, [current]);
   useEffect(() => {
-    if (goal) setGoalForm({ ...goal, targetTimeMin: goal.targetTimeMin ?? "" });
+    if (goal) setGoalForm({ ...goal, distanceKm: goal.distanceKm === 21.1 ? 21.097 : goal.distanceKm, priority: goal.priority || "finish_healthy", terrain: goal.terrain || "road", targetTimeMin: goal.targetTimeMin ?? "" });
   }, [goal]);
   async function saveProfile(event: React.FormEvent) {
     event.preventDefault();
@@ -2713,7 +2866,7 @@ function ProfileView({
     window.addEventListener("open-profile", handler);
     return () => window.removeEventListener("open-profile", handler);
   }, []);
-  const toggleTraining = (dayIndex: number, field: keyof DayTraining) =>
+  const toggleTraining = (dayIndex: number, field: Exclude<keyof DayTraining, "maxSessionMinutes">) =>
     setForm((currentForm) => {
       const trainingSchedule = currentForm.trainingSchedule.map(
         (day, index) => {
@@ -2737,6 +2890,8 @@ function ProfileView({
     });
   const update = (key: keyof Profile, value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
+  const toggleScreening = (group: "healthScreening" | "precautionScreening", key: string) =>
+    setForm((current) => ({ ...current, [group]: { ...current[group], [key]: !current[group][key] } }));
   return (
     <div className="profile-layout" id="profile-top">
       <div className="profile-main-column">
@@ -2870,9 +3025,43 @@ function ProfileView({
                 <span>min</span>
               </div>
             </Field>
+            <Field label="Fecha de esa marca"><input form="profile-form" type="date" max={todayISO()} value={form.recent5kDate} onChange={(e) => update("recent5kDate", e.target.value)} /></Field>
           </div>
+          <div className="subsection-label">Carga y tolerancia reciente <span>Las últimas cuatro semanas guían el nivel</span></div>
+          <div className="form-grid three-col">
+            <Field label="Sesiones de carrera por semana"><input form="profile-form" type="number" min="0" max="14" value={form.currentWeeklyRuns} onChange={(e) => update("currentWeeklyRuns", e.target.value)} /></Field>
+            <Field label="Minutos corriendo por semana"><input form="profile-form" type="number" min="0" max="1200" value={form.currentWeeklyMinutes} onChange={(e) => update("currentWeeklyMinutes", e.target.value)} /></Field>
+            <Field label="Tirada más larga · minutos"><input form="profile-form" type="number" min="0" max="600" value={form.longestRunMinutes} onChange={(e) => update("longestRunMinutes", e.target.value)} /></Field>
+            <Field label="Carrera continua cómoda · minutos"><input form="profile-form" type="number" min="0" max="300" value={form.continuousRunMinutes} onChange={(e) => update("continuousRunMinutes", e.target.value)} /></Field>
+            <Field label="Meses de experiencia corriendo"><input form="profile-form" type="number" min="0" max="600" value={form.runningExperienceMonths} onChange={(e) => update("runningExperienceMonths", e.target.value)} /></Field>
+            <Field label="Meses de experiencia de fuerza"><input form="profile-form" type="number" min="0" max="600" value={form.strengthExperienceMonths} onChange={(e) => update("strengthExperienceMonths", e.target.value)} /></Field>
+            <Field label="Semanas desde el último entrenamiento"><input form="profile-form" type="number" min="0" max="104" value={form.weeksSinceTraining} onChange={(e) => update("weeksSinceTraining", e.target.value)} /></Field>
+            <Field label="Máximo por sesión · minutos"><input form="profile-form" type="number" min="15" max="300" value={form.maxSessionMinutes} onChange={(e) => update("maxSessionMinutes", e.target.value)} /></Field>
+            <Field label="Métrica preferida"><select form="profile-form" value={form.preferredRunningMetric} onChange={(e) => update("preferredRunningMetric", e.target.value)}><option value="time">Tiempo y RPE</option><option value="distance">Distancia y ritmo</option></select></Field>
+            <Field label="Prioridad entrenamiento"><select form="profile-form" value={form.trainingPriority} onChange={(e) => update("trainingPriority", e.target.value)}><option value="balanced">Equilibrada</option><option value="running">Carrera</option><option value="strength">Fuerza</option></select></Field>
+            <label className="strength-exercise-option"><input form="profile-form" type="checkbox" checked={form.gymAccess} onChange={(e) => setForm((v) => ({...v,gymAccess:e.target.checked}))} />Tengo acceso a gimnasio</label>
+          </div>
+          <div className="strength-exercise-grid screening-grid">
+            <label className="strength-exercise-option"><input form="profile-form" type="checkbox" checked={form.canWalk30Minutes} onChange={(e) => setForm((v) => ({ ...v, canWalk30Minutes: e.target.checked }))} />Puedo caminar 30 minutos sin síntomas</label>
+            <label className="strength-exercise-option"><input form="profile-form" type="checkbox" checked={form.painWhileWalking} onChange={(e) => setForm((v) => ({ ...v, painWhileWalking: e.target.checked }))} />Tengo dolor al caminar</label>
+          </div>
+          <div className="subsection-label">Recuperación habitual <span>Señales complementarias; no se requiere pulsómetro</span></div>
+          <div className="form-grid three-col">
+            <Field label="Horas de sueño"><input form="profile-form" type="number" min="0" max="24" step="0.5" value={form.recoveryProfile.sleepHours} onChange={(e) => setForm((v) => ({ ...v, recoveryProfile: { ...v.recoveryProfile, sleepHours: e.target.value } }))} /></Field>
+            <Field label="Calidad de sueño · 1–5"><input form="profile-form" type="number" min="1" max="5" value={form.recoveryProfile.sleepQuality} onChange={(e) => setForm((v) => ({ ...v, recoveryProfile: { ...v.recoveryProfile, sleepQuality: e.target.value } }))} /></Field>
+            <Field label="Estrés habitual · 1–5"><input form="profile-form" type="number" min="1" max="5" value={form.recoveryProfile.stress} onChange={(e) => setForm((v) => ({ ...v, recoveryProfile: { ...v.recoveryProfile, stress: e.target.value } }))} /></Field>
+          </div>
+          <div className="strength-exercise-grid screening-grid"><label className="strength-exercise-option"><input form="profile-form" type="checkbox" checked={Boolean(form.recoveryProfile.physicalWork)} onChange={(e) => setForm((v) => ({...v,recoveryProfile:{...v.recoveryProfile,physicalWork:e.target.checked}}))} />Mi trabajo requiere esfuerzo físico</label><label className="strength-exercise-option"><input form="profile-form" type="checkbox" checked={Boolean(form.recoveryProfile.frequentTravel)} onChange={(e) => setForm((v) => ({...v,recoveryProfile:{...v.recoveryProfile,frequentTravel:e.target.checked}}))} />Viajo o trabajo por turnos con frecuencia</label></div>
+          <section className="screening-section">
+            <div className="subsection-label">Cuestionario de seguridad <span>Marca cualquier síntoma o condición actual</span></div>
+            <p className="screening-warning">Si marcas alguna señal de alarma, la aplicación bloqueará la generación del plan y recomendará valoración sanitaria.</p>
+            <label className="strength-exercise-option screening-review"><input form="profile-form" type="checkbox" checked={form.healthScreeningReviewed} onChange={(e) => setForm((v) => ({ ...v, healthScreeningReviewed: e.target.checked }))} />He leído y respondido el cuestionario de seguridad de abajo</label>
+            <div className="strength-exercise-grid screening-grid">{healthQuestions.map(([key,label]) => <label className="strength-exercise-option" key={key}><input form="profile-form" type="checkbox" checked={Boolean(form.healthScreening[key])} onChange={() => toggleScreening("healthScreening",key)} />{label}</label>)}</div>
+            <div className="subsection-label">Condiciones para un plan más conservador <span>Informativo; ajusta la carga y muestra una recomendación</span></div>
+            <div className="strength-exercise-grid screening-grid">{precautionQuestions.map(([key,label]) => <label className="strength-exercise-option" key={key}><input form="profile-form" type="checkbox" checked={Boolean(form.precautionScreening[key])} onChange={() => toggleScreening("precautionScreening",key)} />{label}</label>)}</div>
+          </section>
           <div className="subsection-label">
-            Plan semanal <span>Elige al menos dos días de entrenamiento</span>
+            Plan semanal <span>Elige entre 2 y 6 días y conserva un día completo de descanso</span>
           </div>
           <p className="schedule-helper">
             El trabajo de fuerza se plantea en gimnasio. Puedes combinar fuerza
@@ -2887,7 +3076,7 @@ function ProfileView({
               const active =
                 selection.strength || selection.treadmill || selection.street;
               const options: {
-                field: keyof DayTraining;
+                field: Exclude<keyof DayTraining, "maxSessionMinutes">;
                 label: string;
                 icon: React.ReactNode;
               }[] = [
@@ -2949,6 +3138,7 @@ function ProfileView({
                         <i>{selection.longRun && <Check size={12} />}</i>
                       </label>
                     )}
+                    {active && <label className="day-duration-limit"><span>Máx. sesión · min</span><input form="profile-form" type="number" min="15" max="300" value={selection.maxSessionMinutes || form.maxSessionMinutes} onChange={(e) => setForm((current) => ({...current,trainingSchedule:current.trainingSchedule.map((entry,i)=>i===index?{...entry,maxSessionMinutes:e.target.value}:entry)}))} /></label>}
                   </div>
                 </section>
               );
@@ -3011,9 +3201,13 @@ function ProfileView({
                   }))
                 }
               >
+                <option value={1}>1K</option>
+                <option value={1.609}>Milla</option>
+                <option value={3}>3K</option>
                 <option value={5}>5K</option>
                 <option value={10}>10K</option>
-                <option value={21.1}>Media maratón · 21,1 km</option>
+                <option value={21.097}>Media maratón · 21,1 km</option>
+                <option value={42.195}>Maratón · 42,2 km</option>
               </select>
             </Field>
             <Field label="Fecha de la carrera">
@@ -3027,11 +3221,14 @@ function ProfileView({
                 required
               />
             </Field>
+            <Field label="Prioridad"><select value={goalForm.priority || "finish_healthy"} onChange={(e) => setGoalForm((g) => ({ ...g, priority: e.target.value }))}><option value="finish_healthy">Completar con salud</option><option value="improve_fitness">Mejorar condición</option><option value="time_goal">Buscar un tiempo</option></select></Field>
+            <Field label="Terreno"><select value={goalForm.terrain || "road"} onChange={(e) => setGoalForm((g) => ({ ...g, terrain: e.target.value }))}><option value="road">Asfalto</option><option value="track">Pista</option><option value="trail">Trail</option><option value="treadmill">Cinta</option><option value="mixed">Mixto</option></select></Field>
+            <Field label="Desnivel positivo · m (opcional)"><input type="number" min="0" max="5000" value={goalForm.elevationGainM || ""} onChange={(e) => setGoalForm((g) => ({ ...g, elevationGainM: e.target.value }))} /></Field>
             <Field label="Tiempo objetivo (opcional)">
               <div className="input-unit">
                 <input
                   type="number"
-                  min="10"
+                  min="1"
                   max="600"
                   step="0.5"
                   value={goalForm.targetTimeMin || ""}
@@ -3322,7 +3519,7 @@ function SettingsView({
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `stride-copia-${todayISO()}.json`;
+      a.download = `rompesuelas-copia-${todayISO()}.json`;
       a.click();
       URL.revokeObjectURL(url);
     }, "Copia de seguridad descargada.");
@@ -3351,7 +3548,7 @@ function SettingsView({
           <h2>Tu entrenamiento es tuyo.</h2>
           <p>
             Tu perfil, plan y actividades permanecen en la base de datos local
-            del ordenador donde ejecutas Stride. El móvil accede a través de tu
+            del ordenador donde ejecutas Rompesuelas. El móvil accede a través de tu
             red Wi‑Fi.
           </p>
         </div>

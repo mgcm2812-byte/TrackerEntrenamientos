@@ -12,6 +12,7 @@ import { promisify } from "node:util";
 import { DatabaseSync } from "node:sqlite";
 import { XMLParser } from "fast-xml-parser";
 import FitParser from "fit-file-parser";
+import { generateHybridPlan, assessWeeklyAdaptation, ALGORITHM_CONFIG } from "./algorithm.mjs";
 
 const scrypt = promisify(scryptCb);
 const root = dirname(fileURLToPath(import.meta.url));
@@ -87,6 +88,16 @@ function json(res, status, body, extra = {}) {
 }
 function rowJson(row) {
   return row ? JSON.parse(row.data) : null;
+}
+function scaleSessionDuration(session, duration) {
+  const previous = Math.max(1, Number(session.durationMin) || duration);
+  const ratio = duration / previous;
+  session.durationMin = duration;
+  if (session.distanceKm) session.distanceKm = Math.round(session.distanceKm * ratio * 10) / 10;
+  if (session.load) for (const key of Object.keys(session.load)) session.load[key] = Math.round(Number(session.load[key] || 0) * ratio);
+  if (session.sessionLoad) session.sessionLoad = Math.round(session.sessionLoad * ratio);
+  if (session.impactLoad) session.impactLoad = Math.round(session.impactLoad * ratio);
+  return session;
 }
 async function bodyBuffer(req, max = 8 * 1024 * 1024) {
   const chunks = [];
@@ -252,210 +263,6 @@ function isoDay(d) {
     String(d.getMonth() + 1).padStart(2, "0"),
     String(d.getDate()).padStart(2, "0"),
   ].join("-");
-}
-function genPlan(p, g, version, config = defaultStrengthConfig) {
-  if (!p || !g)
-    throw Object.assign(
-      new Error("Completa primero el perfil y el objetivo."),
-      { status: 400 },
-    );
-  if (
-    !g.raceDate ||
-    parseDate(g.raceDate) <= new Date(new Date().toDateString())
-  )
-    throw Object.assign(new Error("La fecha del objetivo debe ser futura."), {
-      status: 400,
-    });
-  const schedule = Array.isArray(p.trainingSchedule) ? p.trainingSchedule : [];
-  const activeDays = schedule
-    .map((day, index) => ({ day, index }))
-    .filter(({ day }) => day?.strength || day?.treadmill || day?.street);
-  if (activeDays.length < 2)
-    throw Object.assign(
-      new Error("Selecciona sesiones en al menos dos días de la semana."),
-      { status: 400 },
-    );
-  const start = mondayOf(new Date());
-  const end = parseDate(g.raceDate);
-  const weeks = Math.max(
-    1,
-    Math.min(52, Math.ceil((end - start) / (7 * 86400000))),
-  );
-  const distance = Number(g.distanceKm || 5);
-  const runSlots = activeDays.flatMap(({ day, index }) => [
-    ...(day.treadmill
-      ? [{ day: index, mode: "treadmill", longRun: false }]
-      : []),
-    ...(day.street
-      ? [{ day: index, mode: "street", longRun: Boolean(day.longRun) }]
-      : []),
-  ]);
-  if (!runSlots.length)
-    throw Object.assign(
-      new Error(
-        "Selecciona al menos una sesión de carrera para preparar una meta de carrera.",
-      ),
-      { status: 400 },
-    );
-  const strengthDays = activeDays
-    .filter(({ day }) => day.strength)
-    .map(({ index }) => index);
-  const qualitySlot = runSlots.findIndex((slot) => !slot.longRun);
-  const sessions = [];
-  for (let week = 0; week < weeks; week++) {
-    const progress = weeks <= 1 ? 1 : week / (weeks - 1);
-    const phase =
-      progress < 0.32
-        ? "Base"
-        : progress < 0.72
-          ? "Desarrollo"
-          : progress < 0.91
-            ? "Específico"
-            : "Descarga";
-    const cutback = week > 0 && (week + 1) % 4 === 0 && week !== weeks - 1;
-    const weekPhase = cutback ? "Descarga" : phase;
-    const weekStart = new Date(start);
-    weekStart.setDate(start.getDate() + week * 7);
-    const isRaceWeek = week === weeks - 1;
-    for (const [runIndex, slot] of runSlots.entries()) {
-      const d = slot.day;
-      const date = new Date(weekStart);
-      date.setDate(date.getDate() + d);
-      if (date > end || isoDay(date) === g.raceDate) continue;
-      const longRun = slot.longRun;
-      const base = Math.max(
-        2,
-        Number(p.weeklyKm || 12) / Math.max(1, runSlots.length),
-      );
-      const factor = isRaceWeek
-        ? 0.55
-        : cutback
-          ? 0.72
-          : phase === "Base"
-            ? 1 + progress * 0.12
-            : phase === "Desarrollo"
-              ? 1.12 + progress * 0.16
-              : phase === "Específico"
-                ? 1.2
-                : 0.7;
-      const km =
-        Math.round(Math.max(2, base * factor * (longRun ? 1.65 : 0.92)) * 10) /
-        10;
-      const isQuality = !longRun && runIndex === qualitySlot && week % 2 === 1;
-      const location = slot.mode === "treadmill" ? "cinta" : "calle";
-      sessions.push({
-        id: `w${week}-r${runIndex}-${slot.mode}`,
-        date: isoDay(date),
-        day: days[d],
-        week: week + 1,
-        phase: weekPhase,
-        type: "run",
-        title: longRun
-          ? isRaceWeek
-            ? "Tirada larga suave · calle"
-            : cutback
-              ? "Tirada larga de descarga · calle"
-              : "Tirada larga · calle"
-          : isRaceWeek
-            ? `Rodaje suave · ${location}`
-            : cutback
-              ? `Rodaje de descarga · ${location}`
-              : isQuality
-                ? `Intervalos controlados · ${location}`
-                : `Rodaje fácil · ${location}`,
-        distanceKm: km,
-        durationMin: Math.round(km * (isQuality ? 6.5 : 7.1)),
-        effort: cutback
-          ? "RPE 3–4 · recuperación"
-          : isQuality
-            ? "RPE 7 · alegre y controlado"
-            : "RPE 3–4 · conversación cómoda",
-        details: `${
-          isQuality
-            ? `Calentamiento 12 min; ${Math.max(4, Math.round(km / 1.5))} × 2 min a ritmo vivo con 2 min suaves; vuelta a la calma.`
-            : `Ritmo cómodo y respiración controlada durante ${km} km. Prioriza terminar con buenas sensaciones.`
-        } ${slot.mode === "treadmill" ? "En cinta: mantén un paso natural y ajusta la inclinación a una sensación equivalente a correr al aire libre." : "En calle: elige una superficie y un recorrido adecuados a tu nivel."}`,
-        status: "pending",
-      });
-    }
-    for (const [strengthIndex, d] of strengthDays.entries()) {
-      const date = new Date(weekStart);
-      date.setDate(date.getDate() + d);
-      if (date > end || isoDay(date) === g.raceDate) continue;
-      const division = config.division;
-      const split = division === "FullBody"
-        ? [["Espalda", "Pecho", "Hombro", "Brazo", "Pierna", "Core"]]
-        : division === "Tirón/Empuje/Pierna"
-          ? [["Espalda", "Brazo", "Pierna", "Core"], ["Pecho", "Hombro", "Brazo", "Core"], ["Pierna", "Core"]]
-          : [["Espalda", "Pecho", "Hombro", "Brazo", "Core"], ["Pierna", "Core"]];
-      const splitIndex = (week * strengthDays.length + strengthIndex) % split.length;
-      const categories = split[splitIndex];
-      const selected = new Set(config.exercises);
-      const exercises = categories.flatMap((category) => {
-        const available = strengthCatalog.groups[category].filter((name) =>
-          selected.has(name) && !(division === "Tirón/Empuje/Pierna" && category === "Brazo" && (splitIndex === 0 ? /tríceps/i.test(name) : splitIndex === 1 ? /bíceps/i.test(name) : false))
-        );
-        if (!available.length) return [];
-        const offset = (week + strengthIndex) % available.length;
-        return [available[offset]];
-      });
-      const sets =
-        phase === "Base"
-          ? 3
-          : phase === "Descarga" || isRaceWeek || cutback
-            ? 2
-            : 3;
-      sessions.push({
-        id: `w${week}-s${d}`,
-        date: isoDay(date),
-        day: days[d],
-        week: week + 1,
-        phase: weekPhase,
-        type: "strength",
-        title: `Fuerza · ${division}`,
-        durationMin: 45,
-        effort:
-          weekPhase === "Descarga"
-            ? "RPE 5–6 · ligero"
-            : "RPE 6–7 · deja 2–3 repeticiones en reserva",
-        details: `${exercises.length ? exercises.map((exercise) => `${exercise} · ${sets} × ${/plancha|crunch|pallof/i.test(exercise) ? "30–40 s" : "6–10"}`).join("; ") : "Sin ejercicios seleccionados para esta sesión; el administrador debe revisar el catálogo."}. Descansa 90–120 s. Gimnasio: usa una carga que permita mantener la técnica y evita el fallo muscular.`,
-        status: "pending",
-      });
-    }
-    if (isRaceWeek)
-      sessions.push({
-        id: `w${week}-race`,
-        date: g.raceDate,
-        day: days[(parseDate(g.raceDate).getDay() + 6) % 7],
-        week: week + 1,
-        phase: "Competición",
-        type: "race",
-        title: `${g.distanceKm} km · día del objetivo`,
-        distanceKm: distance,
-        durationMin: g.targetTimeMin || null,
-        effort: "Progresivo · empieza conservador",
-        details: `Calentamiento suave. Corre los primeros kilómetros de forma controlada y ajusta el esfuerzo según sensaciones.`,
-        status: "pending",
-      });
-  }
-  sessions.sort((a, b) => a.date.localeCompare(b.date));
-  const notes = [
-    `Progresión gradual según ${Number(p.weeklyKm || 12)} km semanales de referencia; incluye semanas de descarga cada cuatro semanas.`,
-    "La intensidad se prescribe con RPE y conversación; revisa la carga si aparece dolor o fatiga persistente.",
-    "Las sesiones de fuerza se plantean para gimnasio, lejos del fallo y priorizando una técnica estable.",
-  ];
-  if (p.limitations?.trim())
-    notes.push(
-      `Limitaciones comunicadas: ${p.limitations.trim()}. Revisa las sesiones y evita cualquier ejercicio que cause dolor.`,
-    );
-  return {
-    version,
-    createdAt: new Date().toISOString(),
-    goal: g,
-    sessions,
-    weeks,
-    notes,
-  };
 }
 function haversine(a, b) {
   const rad = Math.PI / 180;
@@ -755,9 +562,17 @@ const server = createServer(async (req, res) => {
           return json(res, 200, { config: strengthConfig(), catalog: strengthCatalog });
         if (pathname === "/api/admin/strength" && req.method === "PUT") {
           const config = await bodyJson(req);
+          if (!Array.isArray(config.exercises)) return json(res,400,{error:"Selecciona ejercicios del catálogo."});
           const allowed = new Set(Object.values(strengthCatalog.groups).flat());
-          if (!strengthCatalog.divisions.includes(config.division) || !Array.isArray(config.exercises) || !config.exercises.length || config.exercises.some((name) => !allowed.has(name)) || new Set(config.exercises).size !== config.exercises.length)
-            return json(res, 400, { error: "Selecciona una división válida y al menos un ejercicio del catálogo." });
+          const selected = new Set(config.exercises || []);
+          const hasGroup = (group) => strengthCatalog.groups[group].some((name) => selected.has(name));
+          const coverage = config.division === "FullBody"
+            ? hasGroup("Pierna") && (hasGroup("Espalda") || hasGroup("Pecho")) && (hasGroup("Hombro") || hasGroup("Brazo"))
+            : config.division === "Torso/Pierna"
+              ? hasGroup("Pierna") && hasGroup("Espalda") && hasGroup("Pecho")
+              : hasGroup("Espalda") && hasGroup("Pecho") && hasGroup("Pierna");
+          if (!strengthCatalog.divisions.includes(config.division) || !Array.isArray(config.exercises) || !config.exercises.length || config.exercises.some((name) => !allowed.has(name)) || new Set(config.exercises).size !== config.exercises.length || !coverage)
+            return json(res, 400, { error: "La selección debe incluir ejercicios adecuados a cada parte de la división (torso y pierna; cuerpo completo; o tirón, empuje y pierna)." });
           db.prepare("INSERT INTO app_settings(key,data) VALUES('strength',?) ON CONFLICT(key) DO UPDATE SET data=excluded.data").run(JSON.stringify(config));
           return json(res, 200, { ok: true });
         }
@@ -876,6 +691,7 @@ const server = createServer(async (req, res) => {
               typeof day.treadmill === "boolean" &&
               typeof day.street === "boolean" &&
               typeof day.longRun === "boolean" &&
+              (day.maxSessionMinutes == null || (Number.isFinite(Number(day.maxSessionMinutes)) && Number(day.maxSessionMinutes) >= 15 && Number(day.maxSessionMinutes) <= 300)) &&
               (!day.longRun || day.street),
           );
         const scheduledDays = scheduleValid
@@ -885,13 +701,15 @@ const server = createServer(async (req, res) => {
           : 0;
         if (
           !scheduleValid ||
-          scheduledDays < 2 ||
+          scheduledDays < 2 || scheduledDays > 6 ||
           p.trainingSchedule.filter((day) => day.longRun).length > 1
         )
           return json(res, 400, {
             error:
-              "Selecciona sesiones en al menos dos días. La tirada larga solo puede estar marcada en un día con carrera en calle.",
+              "Selecciona sesiones en 2–6 días para conservar al menos uno de descanso. La tirada larga solo puede estar marcada en un día con carrera en calle.",
           });
+        if (!p.healthScreening || typeof p.healthScreening !== "object" || Object.values(p.healthScreening).some((value) => typeof value !== "boolean") || !p.precautionScreening || typeof p.precautionScreening !== "object" || Object.values(p.precautionScreening).some((value) => typeof value !== "boolean") || typeof p.healthScreeningReviewed !== "boolean")
+          return json(res,400,{error:"Completa el cuestionario de seguridad con respuestas válidas."});
         if (
           !Number.isFinite(Number(p.weeklyKm)) ||
           Number(p.weeklyKm) < 0 ||
@@ -900,19 +718,33 @@ const server = createServer(async (req, res) => {
           return json(res, 400, {
             error: "Los kilómetros semanales deben estar entre 0 y 250.",
           });
+        for (const [key, min, max] of [
+          ["currentWeeklyRuns",0,14],["currentWeeklyMinutes",0,1200],["longestRunMinutes",0,600],
+          ["continuousRunMinutes",0,300],["runningExperienceMonths",0,600],["strengthExperienceMonths",0,600],
+          ["weeksSinceTraining",0,104],["maxSessionMinutes",15,300],
+        ]) {
+          if (p[key] !== undefined && (!Number.isFinite(Number(p[key])) || Number(p[key]) < min || Number(p[key]) > max))
+            return json(res,400,{error:`El dato ${key} está fuera del rango permitido.`});
+        }
         saveSingleton("profile", userId, p);
         return json(res, 200, { ok: true });
       }
       if (pathname === "/api/goal" && req.method === "PUT") {
         const g = await bodyJson(req);
-        if (!["5", "10", "21.1"].includes(String(g.distanceKm)) || !g.raceDate)
+        if (!["1", "1.609", "3", "5", "10", "21.1", "21.097", "42.195"].includes(String(g.distanceKm)) || !g.raceDate)
           return json(res, 400, {
             error: "Selecciona una distancia y fecha válidas.",
           });
+        if (g.priority && !["finish_healthy","improve_fitness","time_goal"].includes(g.priority))
+          return json(res,400,{error:"La prioridad del objetivo no es válida."});
+        if (g.terrain && !["road","track","trail","treadmill","mixed"].includes(g.terrain))
+          return json(res,400,{error:"El terreno del objetivo no es válido."});
+        if (g.elevationGainM !== undefined && g.elevationGainM !== "" && (!Number.isFinite(Number(g.elevationGainM)) || Number(g.elevationGainM)<0 || Number(g.elevationGainM)>5000))
+          return json(res,400,{error:"El desnivel debe estar entre 0 y 5000 metros."});
         if (
           g.targetTimeMin &&
           (!Number.isFinite(Number(g.targetTimeMin)) ||
-            Number(g.targetTimeMin) < 10 ||
+            Number(g.targetTimeMin) < 1 ||
             Number(g.targetTimeMin) > 600)
         )
           return json(res, 400, {
@@ -920,8 +752,11 @@ const server = createServer(async (req, res) => {
           });
         saveSingleton("goal", userId, {
           ...g,
-          distanceKm: Number(g.distanceKm),
+          distanceKm: Number(g.distanceKm) === 21.1 ? 21.097 : Number(g.distanceKm),
           targetTimeMin: g.targetTimeMin ? Number(g.targetTimeMin) : null,
+          priority: g.priority || "finish_healthy",
+          terrain: g.terrain || "road",
+          elevationGainM: g.elevationGainM ? Number(g.elevationGainM) : null,
         });
         return json(res, 200, { ok: true });
       }
@@ -931,14 +766,67 @@ const server = createServer(async (req, res) => {
             "SELECT COALESCE(MAX(version),0)+1 AS n FROM plans WHERE user_id=?",
           )
           .get(userId).n;
-        const plan = genPlan(profile(userId), goal(userId), version, strengthConfig());
+        const plan = generateHybridPlan(profile(userId), goal(userId), version, strengthConfig(), strengthCatalog, activities(userId));
         db.prepare(
           "INSERT INTO plans(user_id,version,created_at,data) VALUES(?,?,?,?)",
-        ).run(userId, version, plan.createdAt, JSON.stringify(plan));
+        ).run(userId, version, plan.generatedAt || new Date().toISOString(), JSON.stringify(plan));
         db.prepare(
           "UPDATE proposals SET status='dismissed' WHERE user_id=? AND status='pending'",
         ).run(userId);
         return json(res, 201, { plan });
+      }
+      if (pathname.startsWith("/api/sessions/") && pathname.endsWith("/fit") && req.method === "POST") {
+        const sessionId = pathname.split("/").at(-2);
+        const filename = url.searchParams.get("filename") || "session.fit";
+        if (!filename.toLowerCase().endsWith(".fit"))
+          return json(res, 400, { error: "Adjunta un archivo .FIT para asociarlo a la sesión." });
+        const plan = latestPlan(userId);
+        if (!plan) return json(res, 404, { error: "No hay un plan activo." });
+        const session = plan.sessions.find((item) => item.id === sessionId);
+        if (!session) return json(res, 404, { error: "No se encontró la sesión." });
+        if (session.status === "skipped") return json(res, 409, { error: "No puedes adjuntar una actividad a una sesión marcada como omitida." });
+        const buffer = await bodyBuffer(req, 40 * 1024 * 1024);
+        const parsed = await parseActivity(buffer, filename);
+        const imported = parsed.activity;
+        const existing = db.prepare("SELECT id,data FROM activities WHERE user_id=? AND file_hash=?").get(userId, parsed.fileHash);
+        let activityId;
+        if (existing) {
+          const oldActivity = JSON.parse(existing.data);
+          if (oldActivity.sessionId && oldActivity.sessionId !== session.id)
+            return json(res, 409, { error: "Este archivo FIT ya está asociado a otra sesión." });
+          const saved = {
+            ...oldActivity,
+            ...imported,
+            fileHash: parsed.fileHash,
+            filename,
+            sessionId: session.id,
+            sessionName: session.title,
+            planVersion: plan.version,
+            note: `Archivo FIT asociado a la sesión: ${session.title}.`,
+          };
+          db.prepare("UPDATE activities SET data=? WHERE id=? AND user_id=?").run(JSON.stringify(saved), existing.id, userId);
+          activityId = Number(existing.id);
+        } else {
+          const saved = {
+            ...imported,
+            fileHash: parsed.fileHash,
+            filename,
+            sessionId: session.id,
+            sessionName: session.title,
+            planVersion: plan.version,
+            rpe: null,
+            soreness: "",
+            note: `Archivo FIT asociado a la sesión: ${session.title}.`,
+          };
+          const result = db.prepare("INSERT INTO activities(user_id,file_hash,created_at,data) VALUES(?,?,?,?)").run(userId, parsed.fileHash, new Date().toISOString(), JSON.stringify(saved));
+          activityId = Number(result.lastInsertRowid);
+        }
+        session.activityId = activityId;
+        session.activityFileName = filename;
+        session.activityDate = imported.date;
+        session.updatedAt = new Date().toISOString();
+        db.prepare("UPDATE plans SET data=? WHERE version=? AND user_id=?").run(JSON.stringify(plan), plan.version, userId);
+        return json(res, 201, { ok: true, activityId, sessionId: session.id });
       }
       if (pathname === "/api/activities/import" && req.method === "POST") {
         const filename = url.searchParams.get("filename") || "activity.fit";
@@ -1017,14 +905,52 @@ const server = createServer(async (req, res) => {
       }
       if (pathname.startsWith("/api/sessions/") && req.method === "PATCH") {
         const sessionId = pathname.split("/").at(-1);
-        const { status } = await bodyJson(req);
-        if (!["completed", "skipped", "pending"].includes(status))
-          return json(res, 400, { error: "Estado de sesión no válido." });
+        const payload = await bodyJson(req);
+        const { status, readiness } = payload;
         const plan = latestPlan(userId);
         if (!plan) return json(res, 404, { error: "No hay un plan activo." });
         const session = plan.sessions.find((s) => s.id === sessionId);
         if (!session)
           return json(res, 404, { error: "No se encontró la sesión." });
+        if (readiness && typeof readiness === "object") {
+          const red = ["painWorsening","changesGait","illness","chestPain","dizziness","unusualBreathlessness"].some((key) => readiness[key]);
+          const yellow = ["poorSleep","fatigueHigh","stressHigh","muscleSorenessHigh","localizedPain"].some((key) => readiness[key]);
+          session.readiness = readiness;
+          if (red) {
+            session.status = "skipped";
+            session.safetyAction = "Sesión cancelada por señales de alarma. No entrenes hoy; si los síntomas son intensos, persisten o empeoran, solicita valoración sanitaria.";
+            session.adaptation = "PAUSE_AND_REFER · READINESS-RED-001";
+            plan.decisions ||= [];
+            plan.decisions.push({ code: "SESSION_CANCELLED_SAFETY", ruleId: "READINESS-RED-001", reason: session.safetyAction, sessionId });
+          } else if (yellow) {
+            scaleSessionDuration(session, Math.max(10, Math.round(Number(session.durationMin || 30) * 0.75)));
+            if (session.type === "run") {
+              session.title = session.title.includes("Tirada") ? "Rodaje largo reducido · fácil" : "Rodaje fácil reducido";
+              session.category = "EASY_RUN";
+              session.effort = "RPE 2–3 · fácil";
+              if (session.distanceKm) session.distanceKm = Math.round(session.distanceKm * 0.75 * 10) / 10;
+              session.details = "Sesión reducida por preparación amarilla. Mantén conversación fluida, elimina los bloques de calidad y detente si el dolor aumenta.";
+            } else {
+              session.title = "Fuerza ligera · volumen reducido";
+              session.effort = "RIR 4 · ligero, sin dolor";
+              session.details = session.details.replace(/(\d+) ×/g, (_, count) => `${Math.max(1, Number(count)-1)} ×`) + " Reduce accesorios y detén cualquier movimiento que cause dolor.";
+            }
+            session.safetyAction = "Preparación amarilla: carga reducida. Reevalúa durante el calentamiento y cancela si aparece dolor creciente o cambia la técnica.";
+            session.adaptation = "DELOAD · READINESS-YELLOW-001";
+            plan.decisions ||= [];
+            plan.decisions.push({ code: "SESSION_REDUCED_READINESS", ruleId: "READINESS-YELLOW-001", reason: session.safetyAction, sessionId });
+          } else {
+            session.safetyAction = "Preparación verde: ejecuta la sesión según lo previsto y detente si aparecen síntomas.";
+            session.adaptation = "READY · READINESS-GREEN-001";
+          }
+          session.updatedAt = new Date().toISOString();
+          session.readinessAt = new Date().toISOString();
+          db.prepare("UPDATE plans SET data=? WHERE version=? AND user_id=?").run(JSON.stringify(plan), plan.version, userId);
+          return json(res, 200, { ok: true, status: session.status, safetyAction: session.safetyAction });
+        }
+        if (!["completed", "skipped", "pending"].includes(status)) return json(res, 400, { error: "Estado de sesión no válido." });
+        if (status === "completed" && session.date >= isoDay(new Date()) && (!session.readinessAt || isoDay(new Date(session.readinessAt)) !== isoDay(new Date())))
+          return json(res, 400, { error: "Evalúa tu preparación antes de marcar la sesión como completada." });
         session.status = status;
         session.updatedAt = new Date().toISOString();
         db.prepare("UPDATE plans SET data=? WHERE version=? AND user_id=?").run(
@@ -1036,76 +962,66 @@ const server = createServer(async (req, res) => {
       }
       if (pathname === "/api/adaptation" && req.method === "POST") {
         const history = activities(userId);
-        if (!history.length)
-          return json(res, 400, {
-            error:
-              "Registra o importa una actividad antes de reevaluar el plan.",
-          });
-        const recent = history.slice(0, 7);
-        const highEffort = recent.some((a) => Number(a.rpe) >= 9);
-        const soreness = recent.some((a) => Boolean(a.soreness));
-        const skipped =
-          latestPlan(userId)?.sessions.filter(
-            (s) =>
-              s.status === "skipped" &&
-              s.date >= new Date().toISOString().slice(0, 10),
-          ).length || 0;
-        const message =
-          highEffort || soreness
-            ? "La carga reciente parece alta. Se propone reducir un 20% el volumen de carrera de los próximos 7 días y mantener la fuerza ligera."
-            : skipped
-              ? "Hay sesiones futuras marcadas como omitidas. Se propone reorganizar la semana y priorizar recuperación."
-              : "El esfuerzo registrado es compatible con el plan actual. Se mantiene la progresión prevista y se revisa de nuevo tras las próximas sesiones.";
         const plan = latestPlan(userId);
-        const proposedSessions = plan
-          ? plan.sessions.map((s) => {
-              if (
-                s.date < new Date().toISOString().slice(0, 10) ||
-                s.date >
-                  new Date(Date.now() + 7 * 86400000)
-                    .toISOString()
-                    .slice(0, 10) ||
-                s.status !== "pending" ||
-                s.type === "race"
-              )
-                return s;
-              if (highEffort || soreness)
-                return s.type === "run"
-                  ? {
-                      ...s,
-                      distanceKm: Math.round(s.distanceKm * 0.8 * 10) / 10,
-                      durationMin: Math.round(s.durationMin * 0.8),
-                      effort: "RPE 3 · recuperación",
-                      title: s.title.includes("Tirada")
-                        ? "Rodaje largo reducido"
-                        : "Rodaje fácil reducido",
-                      adaptation:
-                        "Volumen reducido un 20% por el esfuerzo o las molestias comunicadas.",
-                    }
-                  : {
-                      ...s,
-                      durationMin: 30,
-                      effort: "RPE 5 · ligero, sin dolor",
-                      details: `${s.details.replaceAll(/([2-3]) ×/g, (_, sets) => `${Math.max(1, Number(sets) - 1)} ×`)} Reduce una serie por ejercicio y detén cualquier movimiento que provoque dolor.`,
-                      adaptation:
-                        "Fuerza ligera y una serie menos por ejercicio según el esfuerzo o las molestias comunicadas.",
-                    };
-              if (skipped && s.type === "run")
-                return {
-                  ...s,
-                  title: "Rodaje fácil · semana reajustada",
-                  effort: "RPE 3–4 · conversación cómoda",
-                  adaptation: "Sesión reajustada para recuperar continuidad.",
-                };
-              return s;
-            })
-          : [];
-        const proposal = {
-          reason: message,
-          generatedFrom: recent.map((a) => a.id || a.fileHash || a.date),
-          planVersion: plan?.version ?? null,
-          plan: plan ? { ...plan, sessions: proposedSessions } : null,
-        };
+        if (!plan) return json(res, 400, { error: "Genera primero un plan para reevaluarlo." });
+        const today = new Date(); today.setHours(0,0,0,0);
+        const todayKey = isoDay(today);
+        const weekStart = new Date(today); weekStart.setDate(today.getDate()-((today.getDay()+6)%7));
+        const previousWeekStart = new Date(weekStart); previousWeekStart.setDate(weekStart.getDate()-7);
+        const previousWeekKey = isoDay(previousWeekStart);
+        const previousWeekEnd = new Date(weekStart); previousWeekEnd.setDate(weekStart.getDate()-1);
+        const previousWeekEndKey = isoDay(previousWeekEnd);
+        const weekSessions = plan.sessions.filter((s)=>s.date>=previousWeekKey&&s.date<=previousWeekEndKey&&s.type!=="race");
+        const completedSessions = weekSessions.filter((s)=>s.status==="completed").length;
+        const recent = history.filter((a)=>a.date>=previousWeekKey&&a.date<=previousWeekEndKey);
+        const readyChecks=weekSessions.map((s)=>s.readiness||{});
+        const painDays = recent.filter((a)=>a.soreness||a.painWorsening||a.painChangesGait).length+readyChecks.filter((r)=>r.localizedPain||r.painWorsening).length;
+        const poorRecoveryDays = recent.filter((a)=>a.poorSleep||a.fatigueHigh||Number(a.rpe)>=8).length+readyChecks.filter((r)=>r.poorSleep||r.fatigueHigh||r.stressHigh||r.muscleSorenessHigh).length;
+        const illnessDays = recent.filter((a)=>a.illness).length+readyChecks.filter((r)=>r.illness).length;
+        const healthProfile=profile(userId);
+        const profileRedFlag=Boolean(healthProfile?.painWhileWalking)||Object.values(healthProfile?.healthScreening||{}).some(Boolean);
+        const redFlag = profileRedFlag||recent.some((a)=>a.painWorsening||a.painChangesGait||a.illness||a.chestPain||a.dizziness||a.unusualBreathlessness)||readyChecks.some((r)=>r.painWorsening||r.changesGait||r.illness||r.chestPain||r.dizziness||r.unusualBreathlessness)||weekSessions.some((s)=>s.adaptation?.startsWith("PAUSE_AND_REFER"));
+        const missedTrainingDays = plan.sessions.filter((s)=>s.status==="skipped"&&s.date>=previousWeekKey&&s.date<=previousWeekEndKey).length;
+        const lastCompleted = [...plan.sessions.filter((s)=>s.status==="completed"&&s.type!=="race").map((s)=>s.date),...history.map((a)=>a.date)].sort().at(-1);
+        const breakDays = lastCompleted ? Math.floor((today-new Date(`${lastCompleted}T00:00:00`))/86400000) : 0;
+        const reviewMissedDays = breakDays>=7?Math.max(missedTrainingDays,4):missedTrainingDays;
+        const assessment = assessWeeklyAdaptation({plannedSessions:weekSessions.length,completedSessions,painDays,poorRecoveryDays,illnessDays,missedTrainingDays:reviewMissedDays,redFlag});
+        const endDate = new Date(today); endDate.setDate(today.getDate()+7); const endKey=isoDay(endDate);
+        const completedRunMinutes=weekSessions.filter((s)=>s.status==="completed"&&s.type==="run").reduce((sum,s)=>sum+Number(s.durationMin||0),0);
+        const completedLongestRun=weekSessions.filter((s)=>s.status==="completed"&&s.type==="run"&&(s.category==="LONG_RUN"||s.title.includes("Tirada"))).reduce((max,s)=>Math.max(max,Number(s.durationMin||0)),0);
+        const progressionPct=ALGORITHM_CONFIG.maximumWeeklyIncreasePctByLevel[plan.athleteLevel||1]||0;
+        const adjusted = plan.sessions.map((session)=>{
+          if(session.date<todayKey||session.date>endKey||session.status!=="pending"||session.type==="race") return session;
+          if(assessment.state==="PAUSE_AND_REFER") return {...session,status:"skipped",safetyAction:assessment.reason,adaptation:"PAUSE_AND_REFER · ADAPT-PAUSE-001"};
+          if(assessment.state==="DELOAD"||assessment.state==="REGRESS") {
+            const factor=assessment.state==="DELOAD"?0.8:0.7;
+            const next={...session,effort:"RPE 2–3 · fácil y controlado",adaptation:`${assessment.state} · ${assessment.ruleId}`,safetyAction:assessment.reason};
+            scaleSessionDuration(next,Math.max(10,Math.round(Number(session.durationMin||30)*factor)));
+            if(next.type==="run") { next.title=session.title.includes("Tirada")?"Tirada reducida y fácil":"Rodaje fácil reducido"; next.category="EASY_RUN"; next.details="Sesión reducida según la revisión semanal. No recuperes sesiones perdidas ni acumules carga."; }
+            else { next.title="Fuerza ligera · descarga"; next.details=session.details.replace(/(\d+) ×/g,(_,n)=>`${Math.max(1,Number(n)-1)} ×`); }
+            return next;
+          }
+          if(assessment.state==="PROGRESS"&&session.type==="run"&&completedRunMinutes>0) {
+            let duration=Math.round(Number(session.durationMin||20)*(1+progressionPct));
+            const athleteProfile=profile(userId);
+            const sessionDay=new Date(`${session.date}T12:00:00`).getDay();
+            const sessionDayIndex=(sessionDay+6)%7;
+            const dayLimit=Number(athleteProfile?.trainingSchedule?.[sessionDayIndex]?.maxSessionMinutes||athleteProfile?.maxSessionMinutes||300);
+            duration=Math.min(duration,dayLimit);
+            if(session.category==="LONG_RUN"&&completedLongestRun>0) duration=Math.min(duration,Math.round(completedLongestRun*(1+progressionPct)));
+            const next={...session,adaptation:`PROGRESS · ${assessment.ruleId}`,safetyAction:`Carga ajustada un máximo de ${Math.round(progressionPct*100)}% tras cumplimiento alto y recuperación adecuada.`};
+            scaleSessionDuration(next,duration);
+            return next;
+          }
+          return {...session,adaptation:`${assessment.state} · ${assessment.ruleId}`,safetyAction:assessment.reason};
+        });
+        const rebuildAfterBreak=breakDays>=28&&!redFlag;
+        const rebuilt=rebuildAfterBreak?generateHybridPlan(profile(userId),goal(userId),plan.version+1,strengthConfig(),strengthCatalog,history):null;
+        const proposalReason=rebuildAfterBreak?"Regreso tras una interrupción de 28 días o más: se reclasifica el nivel y se reconstruye una fase de base.":assessment.reason;
+        const completedWeekSessions=weekSessions.filter((s)=>s.status==="completed");
+        const plannedLoad=weekSessions.reduce((total,s)=>total+Object.values(s.load||{}).reduce((sum,value)=>sum+Number(value||0),0),0);
+        const completedLoad=completedWeekSessions.reduce((total,s)=>total+Object.values(s.load||{}).reduce((sum,value)=>sum+Number(value||0),0),0);
+        const proposal = {reason:proposalReason,adaptation:{...assessment,reason:proposalReason},weeklyReview:{plannedSessions:weekSessions.length,completedSessions,painDays,poorRecoveryDays,illnessDays,missedTrainingDays:reviewMissedDays,breakDays,plannedDurationMinutes:weekSessions.reduce((sum,s)=>sum+Number(s.durationMin||0),0),completedDurationMinutes:completedWeekSessions.reduce((sum,s)=>sum+Number(s.durationMin||0),0),plannedLoad,completedLoad,completedRunMinutes,longestRunCompleted:completedWeekSessions.some((s)=>s.category==="LONG_RUN"),qualitySessionCompleted:completedWeekSessions.some((s)=>["THRESHOLD","INTERVALS","HILLS"].includes(s.category)),strengthSessionsCompleted:completedWeekSessions.filter((s)=>s.type==="strength").length,sessionRpeAverage:recent.filter((a)=>Number(a.rpe)>0).length?recent.filter((a)=>Number(a.rpe)>0).reduce((sum,a)=>sum+Number(a.rpe),0)/recent.filter((a)=>Number(a.rpe)>0).length:null},generatedFrom:recent.map((a)=>a.id||a.fileHash||a.date),planVersion:plan.version,plan:rebuilt||{...plan,sessions:adjusted,decisions:[...(plan.decisions||[]),{code:`WEEK_${assessment.state}`,ruleId:assessment.ruleId,reason:proposalReason}]}};
         const result = db
           .prepare(
             "INSERT INTO proposals(user_id,status,created_at,data) VALUES(?,'pending',?,?)",
@@ -1163,7 +1079,7 @@ const server = createServer(async (req, res) => {
       }
       if (pathname === "/api/export" && req.method === "GET")
         return json(res, 200, exportData(userId), {
-          "Content-Disposition": 'attachment; filename="stride-backup.json"',
+          "Content-Disposition": 'attachment; filename="rompesuelas-copia.json"',
         });
       if (pathname === "/api/import-backup" && req.method === "POST") {
         const backup = await bodyJson(req, 256 * 1024 * 1024);
@@ -1258,12 +1174,13 @@ const server = createServer(async (req, res) => {
         status >= 500
           ? "Ha ocurrido un error al guardar los datos. Inténtalo de nuevo."
           : error.message || "No se pudo completar la solicitud.",
+      ...(error?.reasonCodes ? { reasonCodes: error.reasonCodes } : {}),
     });
   }
 });
 
 server.listen(port, "0.0.0.0", () =>
   console.log(
-    `Stride API en http://0.0.0.0:${port} — base de datos en ${join(dataDir, "stride.sqlite")}`,
+    `Rompesuelas en http://0.0.0.0:${port} — base de datos en ${join(dataDir, "stride.sqlite")}`,
   ),
 );
