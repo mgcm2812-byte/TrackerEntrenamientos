@@ -699,6 +699,7 @@ function AdminWorkspace({
   runAction: <T>(fn: () => Promise<T>, success?: string) => Promise<T | null>;
   signOut: () => void;
 }) {
+  const [adminSection, setAdminSection] = useState<"users" | "strength">("users");
   return (
     <div className="app-shell admin-shell">
       <aside className="sidebar">
@@ -712,11 +713,12 @@ function AdminWorkspace({
         <div className="sidebar-caption">GESTIÓN</div>
         <nav className="nav-list" aria-label="Administración">
           <NavButton
-            active
+            active={adminSection === "users"}
             icon={<ShieldCheck size={18} />}
             label="Usuarios"
-            onClick={() => {}}
+            onClick={() => setAdminSection("users")}
           />
+          <NavButton active={adminSection === "strength"} icon={<Dumbbell size={18} />} label="Entrenamiento de fuerza" onClick={() => setAdminSection("strength")} />
         </nav>
         <div className="sidebar-bottom">
           <div className="account-row">
@@ -755,9 +757,9 @@ function AdminWorkspace({
         <div className="page-content">
           <div className="page-heading">
             <div>
-              <div className="eyebrow">MANTENIMIENTO DE CUENTAS</div>
-              <h1>Administración de usuarios</h1>
-              <p>Gestiona accesos y datos de los usuarios de Stride.</p>
+              <div className="eyebrow">{adminSection === "users" ? "MANTENIMIENTO DE CUENTAS" : "CONFIGURACIÓN DE PLANES"}</div>
+              <h1>{adminSection === "users" ? "Administración de usuarios" : "Entrenamiento de fuerza"}</h1>
+              <p>{adminSection === "users" ? "Gestiona accesos y datos de los usuarios de Stride." : "Define la división y los ejercicios disponibles para elaborar los planes."}</p>
             </div>
           </div>
           {notice && (
@@ -778,7 +780,7 @@ function AdminWorkspace({
               </button>
             </div>
           )}
-          <AdminView runAction={runAction} />
+          {adminSection === "users" ? <AdminView runAction={runAction} /> : <StrengthAdminView runAction={runAction} />}
           <footer className="page-footer">
             <span>Gestión de cuentas y privacidad de datos.</span>
             <span>
@@ -3119,6 +3121,40 @@ type ManagedUser = {
   isAdmin: boolean;
   createdAt: string;
 };
+
+type StrengthConfig = { division: string; exercises: string[] };
+type StrengthCatalog = { divisions: string[]; groups: Record<string, string[]> };
+function StrengthAdminView({ runAction }: { runAction: <T>(fn: () => Promise<T>, success?: string) => Promise<T | null> }) {
+  const [config, setConfig] = useState<StrengthConfig>({ division: "Torso/Pierna", exercises: [] });
+  const [catalog, setCatalog] = useState<StrengthCatalog | null>(null);
+  useEffect(() => {
+    void api<{ config: StrengthConfig; catalog: StrengthCatalog }>("/api/admin/strength")
+      .then((result) => { setConfig(result.config); setCatalog(result.catalog); })
+      .catch(() => {});
+  }, []);
+  function toggleExercise(exercise: string) {
+    setConfig((current) => ({ ...current, exercises: current.exercises.includes(exercise) ? current.exercises.filter((item) => item !== exercise) : [...current.exercises, exercise] }));
+  }
+  async function save() {
+    await runAction(async () => { await api("/api/admin/strength", { method: "PUT", body: JSON.stringify(config) }); }, "Configuración de fuerza guardada.");
+  }
+  return (
+    <div className="settings-layout">
+      <section className="panel settings-intro"><div className="settings-shield"><Dumbbell size={23} /></div><div><div className="eyebrow">CATÁLOGO DE EJERCICIOS</div><h2>Configura las sesiones de fuerza</h2><p>Los planes nuevos utilizarán exclusivamente los ejercicios seleccionados. Puedes actualizar esta selección cuando quieras.</p></div></section>
+      <section className="panel admin-users-panel">
+        <div className="panel-heading"><div><span className="eyebrow">DIVISIÓN DE ENTRENAMIENTO</span><h3>Elige una estructura</h3></div></div>
+        <div className="strength-division-options">{catalog?.divisions.map((division) => <label className="strength-division-option" key={division}><input type="radio" name="strength-division" checked={config.division === division} onChange={() => setConfig((current) => ({ ...current, division }))} /><span>{division}</span></label>)}</div>
+      </section>
+      {catalog && Object.entries(catalog.groups).map(([group, exercises]) => (
+        <section className="panel strength-group-panel" key={group}>
+          <div className="panel-heading"><div><span className="eyebrow">EJERCICIOS</span><h3>{group}</h3></div><span className="strength-selected-count">{exercises.filter((exercise) => config.exercises.includes(exercise)).length} seleccionados</span></div>
+          <div className="strength-exercise-grid">{exercises.map((exercise) => <label className="strength-exercise-option" key={exercise}><input type="checkbox" checked={config.exercises.includes(exercise)} onChange={() => toggleExercise(exercise)} /><span>{exercise}</span></label>)}</div>
+        </section>
+      ))}
+      <div className="strength-save-row"><span>{config.exercises.length} ejercicios seleccionados</span><button className="button button-primary" disabled={!config.exercises.length} onClick={() => void save()}><Save size={15} /> Guardar configuración</button></div>
+    </div>
+  );
+}
 
 function AdminView({
   runAction,

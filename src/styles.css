@@ -2711,6 +2711,40 @@ textarea:focus-visible {
 .admin-users-panel {
   padding: 18px;
 }
+.strength-division-options,
+.strength-exercise-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+.strength-division-option,
+.strength-exercise-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line, #e7e9e8);
+  border-radius: 10px;
+  color: var(--ink, #23312b);
+  cursor: pointer;
+  font-size: 13px;
+}
+.strength-division-option:has(input:checked),
+.strength-exercise-option:has(input:checked) {
+  border-color: #5e987c;
+  background: #f2f8f4;
+}
+.strength-division-option input,
+.strength-exercise-option input { accent-color: #347453; }
+.strength-group-panel { padding: 22px; }
+.strength-selected-count { color: #617169; font-size: 12px; }
+.strength-save-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.strength-save-row > span { color: #617169; font-size: 13px; }
+@media (max-width: 640px) {
+  .strength-group-panel { padding: 16px; }
+  .strength-save-row { align-items: stretch; flex-direction: column; }
+}
 .admin-users-panel .panel-heading h3 {
   margin: 5px 0 0;
 }

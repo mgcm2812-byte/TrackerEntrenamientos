@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS profile (user_id INTEGER PRIMARY KEY REFERENCES users
 CREATE TABLE IF NOT EXISTS goal (user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS plans (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, version INTEGER NOT NULL, created_at TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(user_id, version));
 CREATE TABLE IF NOT EXISTS activities (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, file_hash TEXT, created_at TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(user_id, file_hash));
-CREATE TABLE IF NOT EXISTS proposals (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, status TEXT NOT NULL, created_at TEXT NOT NULL, data TEXT NOT NULL);`);
+CREATE TABLE IF NOT EXISTS proposals (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, status TEXT NOT NULL, created_at TEXT NOT NULL, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, data TEXT NOT NULL);`);
 
 // Upgrade the original single-user schema. Its data is retained in the seeded admin account.
 // Initial CREATEs above are only suitable for fresh databases; rebuild any pre-user tables before using them.
@@ -223,6 +224,22 @@ const days = [
   "Sábado",
   "Domingo",
 ];
+const strengthCatalog = {
+  divisions: ["Torso/Pierna", "FullBody", "Tirón/Empuje/Pierna"],
+  groups: {
+    Espalda: ["Dominadas", "Jalón", "Remo en máquina", "Remo gironda"],
+    Pecho: ["Press en máquina inclinado", "Press en máquina", "Press con mancuernas", "Fondos paralelas", "Aperturas"],
+    Hombro: ["Press militar máquina", "Press militar mancuernas", "Elevaciones laterales mancuernas", "Pájaros en máquina"],
+    Brazo: ["Curl bíceps mancuerna", "Extensión tríceps polea", "Curl bíceps barra", "Press tríceps barra"],
+    Pierna: ["Prensa", "Sentadilla multipower", "Hip Thrust", "Prensa horizontal", "Extensiones cuádriceps", "Curl femoral tumbado", "Curl femoral sentado", "Abductor", "Adductor", "Gemelo en máquina"],
+    Core: ["Planchas", "Crunch abdominal", "Press Pallof"],
+  },
+};
+const defaultStrengthConfig = { division: "Torso/Pierna", exercises: Object.values(strengthCatalog.groups).flat() };
+function strengthConfig() {
+  const row = db.prepare("SELECT data FROM app_settings WHERE key='strength'").get();
+  return row ? JSON.parse(row.data) : defaultStrengthConfig;
+}
 function mondayOf(date) {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
@@ -236,7 +253,7 @@ function isoDay(d) {
     String(d.getDate()).padStart(2, "0"),
   ].join("-");
 }
-function genPlan(p, g, version) {
+function genPlan(p, g, version, config = defaultStrengthConfig) {
   if (!p || !g)
     throw Object.assign(
       new Error("Completa primero el perfil y el objetivo."),
@@ -365,22 +382,23 @@ function genPlan(p, g, version) {
       const date = new Date(weekStart);
       date.setDate(date.getDate() + d);
       if (date > end || isoDay(date) === g.raceDate) continue;
-      const fullBody = strengthDays.length === 1 || strengthIndex === 0;
-      const exercises = fullBody
-        ? [
-            "Sentadilla goblet",
-            "Peso muerto rumano",
-            "Zancada atrás",
-            "Elevación de gemelos",
-            "Plancha",
-          ]
-        : [
-            "Peso muerto",
-            "Step-up",
-            "Hip thrust",
-            "Remo con mancuerna",
-            "Pallof press",
-          ];
+      const division = config.division;
+      const split = division === "FullBody"
+        ? [["Espalda", "Pecho", "Hombro", "Brazo", "Pierna", "Core"]]
+        : division === "Tirón/Empuje/Pierna"
+          ? [["Espalda", "Brazo", "Pierna", "Core"], ["Pecho", "Hombro", "Brazo", "Core"], ["Pierna", "Core"]]
+          : [["Espalda", "Pecho", "Hombro", "Brazo", "Core"], ["Pierna", "Core"]];
+      const splitIndex = (week * strengthDays.length + strengthIndex) % split.length;
+      const categories = split[splitIndex];
+      const selected = new Set(config.exercises);
+      const exercises = categories.flatMap((category) => {
+        const available = strengthCatalog.groups[category].filter((name) =>
+          selected.has(name) && !(division === "Tirón/Empuje/Pierna" && category === "Brazo" && (splitIndex === 0 ? /tríceps/i.test(name) : splitIndex === 1 ? /bíceps/i.test(name) : false))
+        );
+        if (!available.length) return [];
+        const offset = (week + strengthIndex) % available.length;
+        return [available[offset]];
+      });
       const sets =
         phase === "Base"
           ? 3
@@ -394,15 +412,13 @@ function genPlan(p, g, version) {
         week: week + 1,
         phase: weekPhase,
         type: "strength",
-        title: fullBody
-          ? "Fuerza · cuerpo completo"
-          : "Fuerza · posterior y estabilidad",
+        title: `Fuerza · ${division}`,
         durationMin: 45,
         effort:
           weekPhase === "Descarga"
             ? "RPE 5–6 · ligero"
             : "RPE 6–7 · deja 2–3 repeticiones en reserva",
-        details: `${exercises.map((exercise) => `${exercise} · ${sets} × ${exercise === "Plancha" || exercise === "Pallof press" ? "30–40 s" : "6–10"}`).join("; ")}. Descansa 90–120 s. Gimnasio: usa una carga que permita mantener la técnica y evita el fallo muscular.`,
+        details: `${exercises.length ? exercises.map((exercise) => `${exercise} · ${sets} × ${/plancha|crunch|pallof/i.test(exercise) ? "30–40 s" : "6–10"}`).join("; ") : "Sin ejercicios seleccionados para esta sesión; el administrador debe revisar el catálogo."}. Descansa 90–120 s. Gimnasio: usa una carga que permita mantener la técnica y evita el fallo muscular.`,
         status: "pending",
       });
     }
@@ -735,6 +751,16 @@ const server = createServer(async (req, res) => {
           return json(res, 403, {
             error: "Solo el administrador puede realizar esta acción.",
           });
+        if (pathname === "/api/admin/strength" && req.method === "GET")
+          return json(res, 200, { config: strengthConfig(), catalog: strengthCatalog });
+        if (pathname === "/api/admin/strength" && req.method === "PUT") {
+          const config = await bodyJson(req);
+          const allowed = new Set(Object.values(strengthCatalog.groups).flat());
+          if (!strengthCatalog.divisions.includes(config.division) || !Array.isArray(config.exercises) || !config.exercises.length || config.exercises.some((name) => !allowed.has(name)) || new Set(config.exercises).size !== config.exercises.length)
+            return json(res, 400, { error: "Selecciona una división válida y al menos un ejercicio del catálogo." });
+          db.prepare("INSERT INTO app_settings(key,data) VALUES('strength',?) ON CONFLICT(key) DO UPDATE SET data=excluded.data").run(JSON.stringify(config));
+          return json(res, 200, { ok: true });
+        }
         if (pathname === "/api/admin/users" && req.method === "GET")
           return json(res, 200, {
             users: db
@@ -905,7 +931,7 @@ const server = createServer(async (req, res) => {
             "SELECT COALESCE(MAX(version),0)+1 AS n FROM plans WHERE user_id=?",
           )
           .get(userId).n;
-        const plan = genPlan(profile(userId), goal(userId), version);
+        const plan = genPlan(profile(userId), goal(userId), version, strengthConfig());
         db.prepare(
           "INSERT INTO plans(user_id,version,created_at,data) VALUES(?,?,?,?)",
         ).run(userId, version, plan.createdAt, JSON.stringify(plan));
