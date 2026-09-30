@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   ArrowDownToLine,
+  ArrowLeft,
   ArrowRight,
   CalendarDays,
   Check,
@@ -98,6 +99,7 @@ type ActivityLog = {
   soreness: string;
   note: string;
   createdAt?: string;
+  fitData?: Record<string, unknown>;
 };
 type AppData = {
   profile: Profile | null;
@@ -112,7 +114,14 @@ type AppData = {
     plan: Plan;
   };
 };
-type View = "overview" | "plan" | "history" | "profile" | "settings" | "admin";
+type View =
+  | "overview"
+  | "plan"
+  | "history"
+  | "profile"
+  | "settings"
+  | "admin"
+  | "activity-detail";
 
 const dayNames = [
   "Lunes",
@@ -253,6 +262,10 @@ const viewMeta: Record<View, { title: string; subtitle: string }> = {
     title: "Administración",
     subtitle: "Gestiona las cuentas registradas en Stride.",
   },
+  "activity-detail": {
+    title: "Detalle de actividad",
+    subtitle: "Todos los datos registrados en el archivo FIT.",
+  },
 };
 
 async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -325,6 +338,9 @@ export default function App() {
   } | null>(null);
   const [data, setData] = useState<AppData>(emptyState);
   const [view, setView] = useState<View>("overview");
+  const [selectedActivityId, setSelectedActivityId] = useState<number | null>(
+    null,
+  );
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -422,6 +438,13 @@ export default function App() {
 
   const navigate = (next: View) => {
     setView(next);
+    setMobileOpen(false);
+    setNotice("");
+    setError("");
+  };
+  const openActivity = (activityId: number) => {
+    setSelectedActivityId(activityId);
+    setView("activity-detail");
     setMobileOpen(false);
     setNotice("");
     setError("");
@@ -617,12 +640,19 @@ export default function App() {
               refresh={reload}
             />
           )}
+          {view === "activity-detail" && selectedActivityId !== null && (
+            <ActivityDetailView
+              activityId={selectedActivityId}
+              onBack={() => navigate("history")}
+            />
+          )}
           {view === "history" && (
             <HistoryView
               data={data}
               busy={busy}
               runAction={action}
               refresh={reload}
+              onOpenActivity={openActivity}
             />
           )}
           {view === "profile" && (
@@ -1741,11 +1771,13 @@ function HistoryView({
   busy,
   runAction,
   refresh,
+  onOpenActivity,
 }: {
   data: AppData;
   busy: boolean;
   runAction: <T>(fn: () => Promise<T>, success?: string) => Promise<T | null>;
   refresh: () => Promise<void>;
+  onOpenActivity: (activityId: number) => void;
 }) {
   const [preview, setPreview] = useState<ActivityLog | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -1958,7 +1990,13 @@ function HistoryView({
               <span>ESFUERZO</span>
             </div>
             {data.activities.map((a, i) => (
-              <div className="activity-row" key={a.id || a.fileHash || i}>
+              <button
+                type="button"
+                className="activity-row activity-row-clickable"
+                key={a.id || a.fileHash || i}
+                onClick={() => a.id && onOpenActivity(a.id)}
+                aria-label={`Abrir detalle de ${a.source || "actividad"} del ${a.date}`}
+              >
                 <div className="activity-name">
                   <div
                     className={`activity-type-icon ${a.type === "strength" ? "icon-strength" : ""}`}
@@ -1981,6 +2019,11 @@ function HistoryView({
                             ? `Carrera · ${a.source}`
                             : "Carrera"}
                     </strong>
+                    {a.source?.toUpperCase() === "FIT" && (
+                      <span className="activity-view-badge">
+                        Ver todos los datos <ChevronRight size={13} />
+                      </span>
+                    )}
                     <span>
                       {a.soreness
                         ? `Molestias · ${a.soreness.toLowerCase()}`
@@ -2010,7 +2053,7 @@ function HistoryView({
                     "—"
                   )}
                 </span>
-              </div>
+              </button>
             ))}
           </div>
         ) : (
@@ -2038,6 +2081,556 @@ function HistoryView({
         </span>
       </div>
     </>
+  );
+}
+
+type FitRecord = Record<string, unknown>;
+type ChartPoint = { x: number; y: number };
+
+function finiteNumber(value: unknown): number | null {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function fitObjects(value: unknown): FitRecord[] {
+  return Array.isArray(value)
+    ? value.filter(
+        (item): item is FitRecord =>
+          Boolean(item) && typeof item === "object" && !Array.isArray(item),
+      )
+    : [];
+}
+
+function fitValue(object: FitRecord | undefined, ...keys: string[]) {
+  for (const key of keys) {
+    const value = object?.[key];
+    if (value !== undefined && value !== null) return value;
+  }
+  return null;
+}
+
+function formatPace(minutesPerKm: number | null) {
+  if (!minutesPerKm || !Number.isFinite(minutesPerKm)) return "—";
+  const totalSeconds = Math.round(minutesPerKm * 60);
+  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, "0")}`;
+}
+
+function paceFromSpeed(speed: unknown) {
+  const kmh = finiteNumber(speed);
+  return kmh && kmh > 0 ? 60 / kmh : null;
+}
+
+function fitLabel(value: string) {
+  return value
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatFitValue(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "boolean") return value ? "Sí" : "No";
+  if (typeof value === "number")
+    return Number.isInteger(value)
+      ? String(value)
+      : value.toLocaleString("es-ES", { maximumFractionDigits: 3 });
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(formatFitValue).join(", ");
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function ActivityDetailView({
+  activityId,
+  onBack,
+}: {
+  activityId: number;
+  onBack: () => void;
+}) {
+  const [activity, setActivity] = useState<ActivityLog | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  useEffect(() => {
+    let live = true;
+    setLoading(true);
+    setLoadError("");
+    api<ActivityLog>(`/api/activities/${activityId}`)
+      .then((result) => {
+        if (live) setActivity(result);
+      })
+      .catch((error: unknown) => {
+        if (live)
+          setLoadError(
+            error instanceof Error
+              ? error.message
+              : "No se pudo cargar el detalle de esta actividad.",
+          );
+      })
+      .finally(() => {
+        if (live) setLoading(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [activityId]);
+
+  if (loading)
+    return (
+      <div className="panel activity-detail-loading">
+        <div className="brand-mark">S</div>
+        <p>Cargando todos los datos de la actividad…</p>
+      </div>
+    );
+  if (loadError || !activity)
+    return (
+      <section className="panel activity-detail-error">
+        <button className="button button-outline" onClick={onBack}>
+          <ArrowLeft size={15} /> Volver al historial
+        </button>
+        <p>{loadError || "No se encontró esta actividad."}</p>
+      </section>
+    );
+
+  const fit = activity.fitData;
+  const fitSessions = fitObjects(fit?.sessions);
+  const session = fitSessions.at(-1);
+  const records = fitObjects(fit?.records);
+  const laps = fitObjects(fit?.laps);
+  const usesDistance = records.some(
+    (record) => finiteNumber(record.distance) !== null,
+  );
+  let lastDistance: number | null = null;
+  let lastElapsed: number | null = null;
+  const recordRows = records.map((record, index) => {
+    const currentDistance = finiteNumber(record.distance);
+    const currentElapsed =
+      finiteNumber(record.elapsed_time) ??
+      finiteNumber(record.timer_time) ??
+      (record.timestamp ? Date.parse(String(record.timestamp)) / 1000 : null);
+    let speed =
+      finiteNumber(record.enhanced_speed) ?? finiteNumber(record.speed);
+    if (
+      (!speed || speed <= 0) &&
+      currentDistance !== null &&
+      lastDistance !== null &&
+      currentElapsed !== null &&
+      lastElapsed !== null &&
+      currentElapsed > lastElapsed
+    )
+      speed =
+        ((currentDistance - lastDistance) * 3600) /
+        (currentElapsed - lastElapsed);
+    if (currentDistance !== null) lastDistance = currentDistance;
+    if (currentElapsed !== null) lastElapsed = currentElapsed;
+    const x = usesDistance
+      ? currentDistance
+      : currentElapsed !== null
+        ? currentElapsed / 60
+        : index;
+    return { record, x: x ?? index, speed };
+  });
+  const series = (field: string, alias?: string): ChartPoint[] =>
+    recordRows.flatMap(({ record, x }) => {
+      const value =
+        finiteNumber(record[field]) ??
+        (alias ? finiteNumber(record[alias]) : null);
+      return value === null ? [] : [{ x, y: value }];
+    });
+  const paceSeries = recordRows.flatMap(({ x, speed }) => {
+    const pace = paceFromSpeed(speed);
+    return pace && pace > 1.5 && pace < 35 ? [{ x, y: pace }] : [];
+  });
+  const heartSeries = series("heart_rate", "enhanced_heart_rate");
+  const altitudeSeries = series("enhanced_altitude", "altitude").map(
+    (point) => ({
+      ...point,
+      y: point.y * 1000,
+    }),
+  );
+  const powerSeries = series("power", "enhanced_power");
+  const cadenceSeries = series("cadence", "fractional_cadence");
+  const rawDataJson = fit ? JSON.stringify(fit, null, 2) : "";
+  const averageSpeed = finiteNumber(
+    fitValue(session, "enhanced_avg_speed", "avg_speed"),
+  );
+  const averagePace = paceFromSpeed(averageSpeed);
+  const ascentKm = finiteNumber(fitValue(session, "total_ascent"));
+  const sport = fitValue(session, "sport", "sub_sport", "name");
+  const dateLabel = prettyDate(activity.date, {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+  const metrics: { label: string; value: string; detail?: string }[] = [
+    { label: "DISTANCIA", value: formatDistance(activity.distanceKm) },
+    { label: "DURACIÓN", value: formatMinutes(activity.durationMin) },
+    {
+      label: "RITMO MEDIO",
+      value: averagePace ? `${formatPace(averagePace)} /km` : "—",
+    },
+    {
+      label: "FC MEDIA",
+      value: activity.avgHeartRate ? `${activity.avgHeartRate} bpm` : "—",
+    },
+    {
+      label: "FC MÁXIMA",
+      value: activity.maxHeartRate ? `${activity.maxHeartRate} bpm` : "—",
+    },
+    {
+      label: "CALORÍAS",
+      value: formatFitValue(fitValue(session, "total_calories", "calories")),
+    },
+    {
+      label: "ASCENSO",
+      value:
+        ascentKm !== null
+          ? `${Math.round(ascentKm * 1000).toLocaleString("es-ES")} m`
+          : "—",
+    },
+    {
+      label: "CADENCIA MEDIA",
+      value:
+        fitValue(session, "avg_cadence") !== null
+          ? `${formatFitValue(fitValue(session, "avg_cadence"))} pasos/min`
+          : "—",
+    },
+    {
+      label: "POTENCIA MEDIA",
+      value:
+        fitValue(session, "avg_power") !== null
+          ? `${formatFitValue(fitValue(session, "avg_power"))} W`
+          : "—",
+    },
+    { label: "RPE", value: activity.rpe ? `${activity.rpe} / 10` : "—" },
+  ];
+
+  return (
+    <div className="activity-detail-page">
+      <button
+        className="button button-outline activity-back-button"
+        onClick={onBack}
+      >
+        <ArrowLeft size={15} /> Volver al historial
+      </button>
+      <section className="panel activity-detail-hero">
+        <div className="activity-detail-icon">
+          <Footprints size={22} />
+        </div>
+        <div className="activity-detail-title">
+          <div className="eyebrow">
+            DETALLE COMPLETO · {activity.source || "ACTIVIDAD"}
+          </div>
+          <h2>{activity.filename || "Actividad"}</h2>
+          <p>
+            {dateLabel}
+            {sport ? ` · ${fitLabel(String(sport))}` : ""}
+          </p>
+        </div>
+        <span className="activity-detail-record-count">
+          {records.length
+            ? `${records.length.toLocaleString("es-ES")} registros`
+            : "Resumen"}
+        </span>
+      </section>
+
+      {activity.source?.toUpperCase() === "FIT" && !fit && (
+        <div className="activity-fit-legacy-note">
+          <CircleHelp size={17} />
+          <span>
+            Esta actividad se importó antes de guardar el detalle completo del
+            FIT. Vuelve a importar el archivo original para completar sus datos;
+            se actualizará este registro existente.
+          </span>
+        </div>
+      )}
+
+      <section className="activity-detail-metrics">
+        {metrics.map((metric) => (
+          <article className="panel activity-metric-card" key={metric.label}>
+            <span>{metric.label}</span>
+            <strong>{metric.value}</strong>
+          </article>
+        ))}
+      </section>
+
+      {paceSeries.length > 1 ||
+      heartSeries.length > 1 ||
+      altitudeSeries.length > 1 ||
+      powerSeries.length > 1 ||
+      cadenceSeries.length > 1 ? (
+        <section className="activity-chart-grid">
+          {paceSeries.length > 1 && (
+            <ActivityChart
+              title="Ritmo"
+              unit="min/km"
+              color="#4f8968"
+              points={paceSeries}
+              xLabel={usesDistance ? "Distancia (km)" : "Tiempo (min)"}
+              formatter={(value) => formatPace(value)}
+              lowerIsBetter
+            />
+          )}
+          {heartSeries.length > 1 && (
+            <ActivityChart
+              title="Frecuencia cardiaca"
+              unit="bpm"
+              color="#d97766"
+              points={heartSeries}
+              xLabel={usesDistance ? "Distancia (km)" : "Tiempo (min)"}
+            />
+          )}
+          {altitudeSeries.length > 1 && (
+            <ActivityChart
+              title="Altitud"
+              unit="m"
+              color="#7185ad"
+              points={altitudeSeries}
+              xLabel={usesDistance ? "Distancia (km)" : "Tiempo (min)"}
+            />
+          )}
+          {powerSeries.length > 1 && (
+            <ActivityChart
+              title="Potencia"
+              unit="W"
+              color="#bb8b45"
+              points={powerSeries}
+              xLabel={usesDistance ? "Distancia (km)" : "Tiempo (min)"}
+            />
+          )}
+          {cadenceSeries.length > 1 && (
+            <ActivityChart
+              title="Cadencia"
+              unit="pasos/min"
+              color="#906ca4"
+              points={cadenceSeries}
+              xLabel={usesDistance ? "Distancia (km)" : "Tiempo (min)"}
+            />
+          )}
+        </section>
+      ) : fit ? (
+        <section className="panel activity-no-charts">
+          <Gauge size={19} />
+          <span>
+            Este archivo no incluye suficientes registros temporales para
+            dibujar gráficas.
+          </span>
+        </section>
+      ) : null}
+
+      {activity.note && (
+        <section className="panel activity-athlete-note">
+          <strong>Notas y sensaciones</strong>
+          <p>{activity.note}</p>
+          {activity.soreness && <span>Molestias: {activity.soreness}</span>}
+        </section>
+      )}
+
+      {laps.length > 0 && (
+        <section className="panel activity-laps-panel">
+          <div className="activity-section-heading">
+            <div>
+              <div className="eyebrow">DESGLOSE</div>
+              <h3>Vueltas · {laps.length}</h3>
+            </div>
+          </div>
+          <div className="activity-laps-list">
+            {laps.map((lap, index) => (
+              <article className="activity-lap-row" key={index}>
+                <strong>Vuelta {index + 1}</strong>
+                <span>{formatDistance(finiteNumber(lap.total_distance))}</span>
+                <span>
+                  {formatMinutes(
+                    Math.round(
+                      (finiteNumber(lap.total_elapsed_time) || 0) / 60,
+                    ) || null,
+                  )}
+                </span>
+                <span>
+                  {finiteNumber(lap.avg_heart_rate)
+                    ? `${lap.avg_heart_rate} bpm`
+                    : "—"}
+                </span>
+                <details>
+                  <summary>Campos de la vuelta</summary>
+                  <FitFieldList value={lap} />
+                </details>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {fit && (
+        <FullFitDisclosure
+          data={fit}
+          recordCount={records.length}
+          rawDataJson={rawDataJson}
+        />
+      )}
+    </div>
+  );
+}
+
+function ActivityChart({
+  title,
+  unit,
+  color,
+  points,
+  xLabel,
+  formatter,
+  lowerIsBetter = false,
+}: {
+  title: string;
+  unit: string;
+  color: string;
+  points: ChartPoint[];
+  xLabel: string;
+  formatter?: (value: number) => string;
+  lowerIsBetter?: boolean;
+}) {
+  const width = 800;
+  const height = 250;
+  const left = 62;
+  const right = 22;
+  const top = 20;
+  const bottom = 42;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const xMin = Math.min(...points.map((point) => point.x));
+  const xMax = Math.max(...points.map((point) => point.x));
+  const yMin = Math.min(...points.map((point) => point.y));
+  const yMax = Math.max(...points.map((point) => point.y));
+  const xRange = xMax - xMin || 1;
+  const yRange = yMax - yMin || Math.max(1, Math.abs(yMin) * 0.1);
+  const coordinates = points
+    .map((point) => {
+      const x = left + ((point.x - xMin) / xRange) * plotWidth;
+      const fraction = (point.y - yMin) / yRange;
+      const y = lowerIsBetter
+        ? top + fraction * plotHeight
+        : top + (1 - fraction) * plotHeight;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  const format =
+    formatter || ((value: number) => Math.round(value).toLocaleString("es-ES"));
+  return (
+    <section className="panel activity-chart-card">
+      <div className="activity-section-heading">
+        <div>
+          <div className="eyebrow">EVOLUCIÓN</div>
+          <h3>{title}</h3>
+        </div>
+        <span>{unit}</span>
+      </div>
+      <svg
+        className="activity-chart"
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={`Gráfica de ${title}`}
+        preserveAspectRatio="none"
+      >
+        {[0, 0.5, 1].map((fraction) => {
+          const y = top + fraction * plotHeight;
+          const valueFraction = lowerIsBetter ? fraction : 1 - fraction;
+          const value = yMin + valueFraction * yRange;
+          return (
+            <g key={fraction}>
+              <line
+                x1={left}
+                y1={y}
+                x2={width - right}
+                y2={y}
+                className="chart-grid-line"
+              />
+              <text
+                x={left - 9}
+                y={y + 4}
+                textAnchor="end"
+                className="chart-axis-label"
+              >
+                {format(value)}
+              </text>
+            </g>
+          );
+        })}
+        <polyline
+          points={coordinates}
+          fill="none"
+          stroke={color}
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+        <text x={left} y={height - 11} className="chart-axis-label">
+          {xMin.toLocaleString("es-ES", { maximumFractionDigits: 1 })}
+        </text>
+        <text
+          x={width - right}
+          y={height - 11}
+          textAnchor="end"
+          className="chart-axis-label"
+        >
+          {xMax.toLocaleString("es-ES", { maximumFractionDigits: 1 })}
+        </text>
+      </svg>
+      <div className="chart-x-axis">{xLabel}</div>
+    </section>
+  );
+}
+
+function FitFieldList({ value }: { value: FitRecord }) {
+  return (
+    <dl className="fit-field-list">
+      {Object.entries(value).map(([key, item]) => (
+        <div key={key}>
+          <dt>{fitLabel(key)}</dt>
+          <dd>{formatFitValue(item)}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function FullFitDisclosure({
+  data,
+  recordCount,
+  rawDataJson,
+}: {
+  data: Record<string, unknown>;
+  recordCount: number;
+  rawDataJson: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <section className="panel activity-all-data-panel">
+      <div className="activity-section-heading">
+        <div>
+          <div className="eyebrow">ARCHIVO ORIGINAL INTERPRETADO</div>
+          <h3>Todos los datos FIT</h3>
+          <p>
+            Incluye todas las sesiones, vueltas, puntos de registro, mensajes
+            reconocidos y campos sin mapear que contenía el archivo.
+          </p>
+        </div>
+      </div>
+      <button
+        className="button button-outline"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        {expanded
+          ? "Ocultar datos técnicos"
+          : `Mostrar todos los datos · ${recordCount.toLocaleString("es-ES")} registros`}
+        <ChevronDown size={15} />
+      </button>
+      {expanded && (
+        <pre className="activity-full-fit-json">
+          {rawDataJson || JSON.stringify(data, null, 2)}
+        </pre>
+      )}
+    </section>
   );
 }
 

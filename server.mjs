@@ -93,15 +93,18 @@ async function bodyBuffer(req, max = 8 * 1024 * 1024) {
   for await (const chunk of req) {
     length += chunk.length;
     if (length > max)
-      throw Object.assign(new Error("El archivo supera el límite de 40 MB."), {
-        status: 413,
-      });
+      throw Object.assign(
+        new Error("La solicitud supera el límite de tamaño admitido."),
+        {
+          status: 413,
+        },
+      );
     chunks.push(chunk);
   }
   return Buffer.concat(chunks);
 }
-async function bodyJson(req) {
-  const raw = await bodyBuffer(req, 8 * 1024 * 1024);
+async function bodyJson(req, maxBytes = 8 * 1024 * 1024) {
+  const raw = await bodyBuffer(req, maxBytes);
   try {
     return JSON.parse(raw.toString("utf8"));
   } catch {
@@ -191,17 +194,17 @@ function latestProposal(userId) {
       }
     : null;
 }
-function activities(userId) {
+function activities(userId, includeFitData = false) {
   return db
     .prepare(
       "SELECT id, created_at, data FROM activities WHERE user_id=? ORDER BY created_at DESC",
     )
     .all(userId)
-    .map((row) => ({
-      id: row.id,
-      createdAt: row.created_at,
-      ...JSON.parse(row.data),
-    }));
+    .map((row) => {
+      const activity = JSON.parse(row.data);
+      if (!includeFitData) delete activity.fitData;
+      return { id: row.id, createdAt: row.created_at, ...activity };
+    });
 }
 function saveSingleton(table, userId, data) {
   db.prepare(
@@ -510,6 +513,11 @@ async function parseActivity(buffer, filename) {
       parsed = await new FitParser({
         mode: "list",
         lengthUnit: "km",
+        speedUnit: "km/h",
+        elapsedRecordField: true,
+        includeUnmappedMessages: true,
+        includeRawDeveloperFields: true,
+        includeRawMessages: true,
         force: false,
       }).parseAsync(buffer);
     } catch {
@@ -549,6 +557,7 @@ async function parseActivity(buffer, filename) {
       avgHeartRate: Number(session.avg_heart_rate) || null,
       maxHeartRate: Number(session.max_heart_rate) || null,
       note: "Importado desde FIT. Revisa los datos y añade RPE y sensaciones.",
+      fitData: parsed,
     };
   } else
     throw invalidFile(
@@ -577,7 +586,7 @@ function exportData(userId) {
         createdAt: r.createdAt,
         ...JSON.parse(r.data),
       })),
-    activities: activities(userId).map(({ id, createdAt, ...rest }) => ({
+    activities: activities(userId, true).map(({ id, createdAt, ...rest }) => ({
       ...rest,
       createdAt,
     })),
@@ -803,6 +812,21 @@ const server = createServer(async (req, res) => {
           activities: activities(userId),
           proposal: latestProposal(userId),
         });
+      const activityDetailRoute = pathname.match(/^\/api\/activities\/(\d+)$/);
+      if (activityDetailRoute && req.method === "GET") {
+        const row = db
+          .prepare(
+            "SELECT id, created_at, data FROM activities WHERE id=? AND user_id=?",
+          )
+          .get(Number(activityDetailRoute[1]), userId);
+        if (!row)
+          return json(res, 404, { error: "No se encontró esta actividad." });
+        return json(res, 200, {
+          id: row.id,
+          createdAt: row.created_at,
+          ...JSON.parse(row.data),
+        });
+      }
       if (
         pathname.startsWith("/api/adaptation/") &&
         pathname.endsWith("/dismiss") &&
@@ -894,22 +918,33 @@ const server = createServer(async (req, res) => {
         const filename = url.searchParams.get("filename") || "activity.fit";
         const buffer = await bodyBuffer(req, 40 * 1024 * 1024);
         const parsed = await parseActivity(buffer, filename);
-        if (
-          db
-            .prepare(
-              "SELECT id FROM activities WHERE user_id=? AND file_hash=?",
-            )
-            .get(userId, parsed.fileHash)
-        )
-          return json(res, 409, {
-            error: "Este archivo ya está en tu historial.",
-          });
+        const existing = db
+          .prepare(
+            "SELECT id,data FROM activities WHERE user_id=? AND file_hash=?",
+          )
+          .get(userId, parsed.fileHash);
+        if (existing) {
+          const oldActivity = JSON.parse(existing.data);
+          const canCompleteOldFit =
+            parsed.activity.source === "FIT" &&
+            oldActivity.source === "FIT" &&
+            !oldActivity.fitData;
+          if (!canCompleteOldFit)
+            return json(res, 409, {
+              error: "Este archivo ya está en tu historial.",
+            });
+        }
         return json(res, 200, {
-          preview: { ...parsed.activity, filename, fileHash: parsed.fileHash },
+          preview: {
+            ...parsed.activity,
+            filename,
+            fileHash: parsed.fileHash,
+            ...(existing ? { replacesActivityId: existing.id } : {}),
+          },
         });
       }
       if (pathname === "/api/activities" && req.method === "POST") {
-        const a = await bodyJson(req);
+        const a = await bodyJson(req, 256 * 1024 * 1024);
         if (
           !a.date ||
           !["run", "strength", "other"].includes(a.type) ||
@@ -923,19 +958,35 @@ const server = createServer(async (req, res) => {
             error: "Revisa la fecha, el tipo y el RPE (1–10).",
           });
         const createdAt = new Date().toISOString();
+        const savedData = JSON.stringify({
+          ...a,
+          rpe: a.rpe === "" || a.rpe == null ? null : Number(a.rpe),
+        });
+        const existing = a.fileHash
+          ? db
+              .prepare(
+                "SELECT id,data FROM activities WHERE user_id=? AND file_hash=?",
+              )
+              .get(userId, a.fileHash)
+          : null;
+        if (existing) {
+          const oldActivity = JSON.parse(existing.data);
+          const canCompleteOldFit =
+            oldActivity.source === "FIT" && a.source === "FIT" && a.fitData;
+          if (!canCompleteOldFit || oldActivity.fitData)
+            return json(res, 409, {
+              error: "Este archivo ya está en tu historial.",
+            });
+          db.prepare(
+            "UPDATE activities SET created_at=?,data=? WHERE id=? AND user_id=?",
+          ).run(createdAt, savedData, existing.id, userId);
+          return json(res, 200, { id: existing.id, completedImport: true });
+        }
         const result = db
           .prepare(
             "INSERT INTO activities(user_id,file_hash,created_at,data) VALUES(?,?,?,?)",
           )
-          .run(
-            userId,
-            a.fileHash || null,
-            createdAt,
-            JSON.stringify({
-              ...a,
-              rpe: a.rpe === "" || a.rpe == null ? null : Number(a.rpe),
-            }),
-          );
+          .run(userId, a.fileHash || null, createdAt, savedData);
         return json(res, 201, { id: Number(result.lastInsertRowid) });
       }
       if (pathname.startsWith("/api/sessions/") && req.method === "PATCH") {
@@ -1089,7 +1140,7 @@ const server = createServer(async (req, res) => {
           "Content-Disposition": 'attachment; filename="stride-backup.json"',
         });
       if (pathname === "/api/import-backup" && req.method === "POST") {
-        const backup = await bodyJson(req);
+        const backup = await bodyJson(req, 256 * 1024 * 1024);
         if (
           backup.format !== "stride-backup-v1" ||
           !Array.isArray(backup.plans) ||
