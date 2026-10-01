@@ -2223,6 +2223,7 @@ textarea:focus-visible {
   align-items: center;
   gap: 10px;
 }
+.activity-table-header { grid-template-columns: minmax(210px, 2fr) minmax(90px, 1fr) minmax(72px, 0.65fr) minmax(72px, 0.75fr) minmax(70px, 0.55fr) 32px; }
 .activity-table-header {
   padding: 9px 6px;
   border-bottom: 1px solid #edf0ed;
@@ -2235,6 +2236,13 @@ textarea:focus-visible {
   padding: 11px 6px;
   border-bottom: 1px solid #f1f3f0;
 }
+.activity-row-wrapper { grid-template-columns: minmax(0, 1fr) auto 32px; gap: 7px; padding: 0 6px; }
+.activity-row-main { display: grid; grid-template-columns: minmax(210px, 2fr) minmax(90px, 1fr) minmax(72px, 0.65fr) minmax(72px, 0.75fr) minmax(70px, 0.55fr); align-items: center; gap: 10px; min-width: 0; width: 100%; padding: 11px 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.activity-delete-button { width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 1px solid #f0ded8; border-radius: 9px; background: #fff8f5; color: #b65e4b; cursor: pointer; }
+.activity-delete-button:hover:not(:disabled) { background: #fbe9e2; }
+.activity-delete-button:disabled { opacity: .45; cursor: not-allowed; }
+.activity-assign-select { max-width: 210px; min-width: 130px; padding: 7px 24px 7px 9px; border: 1px solid #dce6dc; border-radius: 9px; background: #fff; color: #456b54; font: inherit; font-size: 11px; }
+.activity-assign-select:disabled { opacity: .55; }
 .activity-row-clickable {
   width: 100%;
   border: 0;
@@ -2405,7 +2413,20 @@ textarea:focus-visible {
 }
 .activity-chart-card {
   min-width: 0;
-  padding: 14px;
+  position: relative;
+  overflow: hidden;
+  padding: 16px 17px 13px;
+  border: 1px solid rgba(224, 232, 223, 0.9);
+  background: linear-gradient(145deg, #fff 0%, #fbfdfb 75%, #f4f8f3 100%);
+  box-shadow: 0 12px 30px rgba(58, 82, 64, 0.07);
+}
+.activity-chart-card::before {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: 3px;
+  background: linear-gradient(90deg, var(--chart-accent, #4f8968), color-mix(in srgb, var(--chart-accent, #4f8968) 12%, transparent));
+  content: "";
 }
 .activity-section-heading {
   display: flex;
@@ -2429,23 +2450,27 @@ textarea:focus-visible {
 .activity-chart {
   display: block;
   width: 100%;
-  height: 220px;
+  height: 238px;
   overflow: visible;
+  margin-top: 5px;
 }
 .chart-grid-line {
-  stroke: #edf1ed;
+  stroke: #e9efea;
   stroke-width: 1;
+  stroke-dasharray: 3 7;
   vector-effect: non-scaling-stroke;
 }
 .chart-axis-label {
-  fill: #9aa49c;
+  fill: #91a096;
   font-family: Inter, sans-serif;
-  font-size: 12.32px;
+  font-size: 11px;
 }
 .chart-x-axis {
-  color: #a0aaa2;
+  color: #829087;
   text-align: center;
-  font-size: 10.5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 .activity-no-charts,
 .activity-fit-legacy-note {
@@ -2738,6 +2763,13 @@ textarea:focus-visible {
 .strength-division-option input,
 .strength-exercise-option input { accent-color: #347453; }
 .strength-group-panel { padding: 22px; }
+.strength-catalog-option { align-items: flex-start; }
+.strength-catalog-option > span { display: grid; gap: 3px; }
+.strength-catalog-option small { color: #657369; font-size: 12px; line-height: 1.4; }
+.strength-session-exercises { display: grid; gap: 9px; margin-top: 16px; }
+.strength-session-exercise { display: grid; gap: 4px; padding: 12px 14px; border: 1px solid #e5ece6; border-radius: 9px; background: #fbfcfa; }
+.strength-session-exercise span, .strength-session-exercise small { color: #657369; font-size: 13px; }
+.strength-equipment-fields { margin-top: 18px; }
 .strength-selected-count { color: #617169; font-size: 13.44px; }
 .strength-save-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .strength-save-row > span { color: #617169; font-size: 14.56px; }
@@ -3504,6 +3536,11 @@ textarea:focus-visible {
     gap: 6px;
     padding: 12px 3px;
   }
+  .activity-row-wrapper { grid-template-columns: minmax(0, 1fr) 30px; gap: 4px; }
+  .activity-row-main { grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 6px; padding: 12px 0; }
+  .activity-row-main .activity-name { grid-column: 1/-1; }
+  .activity-assign-select { grid-column: 1; grid-row: 2; max-width: 100%; }
+  .activity-delete-button { grid-column: 2; grid-row: 2; }
   .activity-name {
     grid-column: 1/-1;
   }
@@ -3740,6 +3777,64 @@ body {
 .button { min-height: 42px; border-radius: 11px; font-weight: 700; }
 .button-primary { background: linear-gradient(135deg, #347554, #245b45); box-shadow: 0 5px 12px rgba(40, 102, 78, .14); }
 .button-primary:hover:not(:disabled) { background: linear-gradient(135deg, #28664e, #194936); box-shadow: 0 8px 17px rgba(40, 102, 78, .2); }
+
+.plan-history-actions { display:flex; align-items:center; justify-content:flex-end; gap:10px; margin:0 0 14px; color:#748078; font-size:12px; }
+.plan-history-actions .button-outline, .plan-history-actions .button-ghost { display:inline-flex; align-items:center; gap:7px; }
+.plan-email-panel { display: flex; align-items: center; gap: 14px; margin: 14px 0; padding: 15px 18px; border-color: #dfeadf; background: linear-gradient(110deg, #fbfdf9, #f1f7ef); }
+.plan-email-icon { width: 42px; height: 42px; flex: 0 0 42px; display: grid; place-items: center; border-radius: 13px; background: #e7f1e6; color: #3c7956; }
+.plan-email-copy { flex: 1; min-width: 0; }
+.plan-email-copy h3 { margin: 4px 0; color: #314d39; font: 700 14px Manrope, sans-serif; }
+.plan-email-copy p { margin: 0; color: #77857a; font-size: 11px; }
+.plan-email-copy small { display: block; margin-top: 5px; color: #a15d42; font-size: 10.5px; }
+@media (max-width: 680px) { .plan-email-panel { align-items: flex-start; flex-wrap: wrap; } .plan-email-copy { flex-basis: calc(100% - 58px); } .plan-email-panel > .button { width: 100%; justify-content: center; } }
+.plan-history-list { display:grid; gap:12px; }
+.plan-history-card { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:20px; border:1px solid #e7ebe5; }
+.plan-history-card.is-active { border-color:#9abda7; box-shadow:0 0 0 2px rgba(52,117,84,.06); }
+.plan-history-card-main { display:flex; align-items:center; gap:14px; min-width:0; }
+.plan-history-icon { display:grid; place-items:center; width:42px; height:42px; flex:none; color:#347554; background:#edf5ef; border-radius:12px; }
+.plan-history-card-title { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.plan-history-card-title h2 { margin:0; font-size:15px; }
+.plan-history-card p { margin:6px 0 3px; color:#657269; font-size:12px; }
+.plan-history-card small { color:#8a958d; font-size:11px; }
+.plan-state-pill { border-radius:999px; padding:4px 9px; font-size:10px; font-weight:700; }
+.plan-state-pill.active { background:#e9f4eb; color:#28664e; }
+.plan-state-pill.archived { background:#f1f3f0; color:#68736b; }
+.plan-history-card-actions { flex:none; }
+.plan-history-card-actions { display:flex; align-items:center; gap:8px; }
+.plan-history-card-actions button { display:inline-flex; align-items:center; justify-content:center; gap:8px; }
+.button-delete-plan { min-height:40px; padding:9px 12px; border:1px solid #f1d4ca; border-radius:11px; background:#fff7f3; color:#b44f3e; font-size:12px; font-weight:700; transition:background .18s ease, transform .18s ease; }
+.button-delete-plan:hover:not(:disabled) { background:#ffebe3; transform:translateY(-1px); }
+.button-delete-plan:focus-visible { outline:3px solid #efb8a6; outline-offset:2px; }
+.plan-history-empty { display:grid; justify-items:center; text-align:center; padding:48px 24px; color:#68756b; }
+.plan-history-empty h2 { margin:14px 0 4px; color:#263a2d; font-size:18px; }
+.plan-history-empty p { max-width:480px; line-height:1.6; font-size:13px; }
+.plan-history-empty button { display:flex; align-items:center; gap:7px; margin-top:10px; }
+@media (max-width: 700px) { .plan-history-actions { flex-wrap:wrap; justify-content:flex-start; } .plan-history-actions span { flex-basis:100%; } .plan-history-card { align-items:flex-start; flex-direction:column; } .plan-history-card-actions { width:100%; } .plan-history-card-actions button { flex:1; } }
+
+/* Brighter, more playful running-club atmosphere */
+.hero-card { background:linear-gradient(112deg,#19483d 0%,#28664e 47%,#5d8150 100%); }
+.hero-card::after { content:""; position:absolute; inset:auto -38px -100px auto; width:250px; height:250px; border-radius:50%; background:#f17b6124; pointer-events:none; }
+.hero-runner-scene { position:absolute; z-index:1; right:21%; bottom:-7px; width:245px; height:180px; opacity:.96; animation:trail-bob 5s ease-in-out infinite; pointer-events:none; }
+.hero-runner-scene svg { width:100%; height:100%; overflow:visible; filter:drop-shadow(0 8px 7px #193c2a2b); }
+.hero-route { z-index:2; opacity:.74; }
+.hero-stamp { z-index:3; background:#28664e30; backdrop-filter:blur(5px); }
+@keyframes trail-bob { 0%,100% { transform:translateY(0) rotate(-1deg); } 50% { transform:translateY(-5px) rotate(1deg); } }
+.stat-card { overflow:hidden; }
+.stat-card::after { content:""; position:absolute; width:84px; height:84px; right:-30px; bottom:-43px; border-radius:50%; background:#f3b09b18; pointer-events:none; }
+.stat-card:nth-child(2)::after { background:#b3d54727; }
+.stat-card:nth-child(3)::after { background:#aaa8df24; }
+.goal-icon { background:#fff0e6; color:#d8634b; border-radius:14px; transform:rotate(5deg); }
+.proposal-card { border-radius:16px; border-color:#f0d7bd; background:linear-gradient(120deg,#fff8ef,#fff3e6); }
+.week-panel, .goal-panel { position:relative; overflow:hidden; }
+.week-panel::before, .goal-panel::before { content:""; position:absolute; width:82px; height:6px; top:0; left:22px; border-radius:0 0 8px 8px; background:linear-gradient(90deg,#f17b61,#ffc867); }
+.goal-panel::before { background:linear-gradient(90deg,#b3d547,#75a35b); }
+.activity-row-clickable { transition:background .16s ease, transform .16s ease; }
+.activity-row-clickable:hover { transform:translateX(3px); }
+.plan-history-card { background:linear-gradient(110deg,#fff 0%,#fff 70%,#fbf9ef 100%); }
+.plan-history-card.is-active { background:linear-gradient(110deg,#fff 0%,#fcfff6 100%); }
+@media (max-width: 820px) { .hero-runner-scene { right:17%; width:205px; height:155px; } }
+@media (max-width: 560px) { .hero-runner-scene { right:0; width:172px; height:132px; opacity:.62; } .hero-route { opacity:.45; } .hero-stamp { display:none; } }
+@media (prefers-reduced-motion: reduce) { .hero-runner-scene { animation:none; } .nav-button, .stat-card, .activity-row-clickable { transition:none; } }
 .button-outline { border-color: #d8dfca; color: #3c634b; border-radius: 11px; }
 .button-light { color: #314d3c; }
 input:not([type="checkbox"]):not([type="radio"]), select, textarea { border-radius: 10px; }
@@ -3754,3 +3849,15 @@ input:not([type="checkbox"]):not([type="radio"]):focus, select:focus, textarea:f
 .readiness-dialog, .session-detail-dialog { border-radius: 20px; }
 .activity-row-clickable:hover { background: #f5f7e9; }
 .session-title-open:not(:disabled):hover { color: #d4624c; }
+.garmin-import-panel { margin-top: 16px; }
+.garmin-import-panel > .panel-heading { align-items: flex-start; }
+.garmin-import-panel > .panel-heading p { margin: 5px 0 0; color: #87948b; font-size: 12px; }
+.garmin-range-actions { align-items: flex-end; justify-content: space-between; gap: 18px; }
+.garmin-range-actions form { flex: 1; max-width: 650px; align-items: end; }
+.garmin-activity-list { display: grid; gap: 7px; margin-top: 16px; }
+.garmin-activity-option { display: flex; align-items: center; gap: 10px; padding: 11px 13px; border: 1px solid #edf0e8; border-radius: 11px; cursor: pointer; }
+.garmin-activity-option > span { display: grid; gap: 3px; }
+.garmin-activity-option small { color: #87948b; font-size: 11px; text-transform: capitalize; }
+.garmin-activity-option.is-disabled { opacity: .55; cursor: default; }
+.garmin-import-panel .inline-error, .garmin-import-panel .inline-success { margin: 12px 0 0; }
+@media (max-width: 640px) { .garmin-range-actions { align-items: stretch; flex-direction: column; } .garmin-range-actions form { max-width: none; } }

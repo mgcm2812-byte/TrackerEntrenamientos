@@ -6,6 +6,7 @@ Aplicación personal local para planificar carrera y fuerza, registrar actividad
 
 - Node.js 22.12 o posterior (la base SQLite usa `node:sqlite`).
 - pnpm 9 o posterior.
+- Python 3.12 o posterior, solo si quieres importar directamente desde Garmin Connect.
 
 ## Ejecutar en desarrollo
 
@@ -15,6 +16,18 @@ pnpm dev
 ```
 
 Abre la dirección local que muestre Vite, normalmente `http://localhost:5173`. Para entrar desde un teléfono conectado a la misma Wi-Fi, abre en el teléfono la dirección de red local que muestre la terminal. Windows puede pedir permiso para permitir conexiones privadas; habilita la red privada para que el teléfono alcance el ordenador.
+
+La conexión directa con Garmin Connect está disponible únicamente en el navegador del propio ordenador; no se habilita desde el teléfono ni desde otro equipo de la red. Instala el paquete `garminconnect` (del proyecto Python `python-garminconnect`) y su dependencia `curl_cffi` una vez desde PowerShell:
+
+```powershell
+python -m pip install -r requirements-garmin.txt
+```
+
+Si Python no está en `PATH`, configura `GARMIN_PYTHON` con la ruta al ejecutable antes de iniciar la aplicación. La contraseña se usa durante el inicio de sesión y no se guarda. Los tokens de sesión se conservan por usuario en la carpeta local `data/garmin/`; desconectar Garmin elimina esos tokens. Selecciona un rango de fechas (hasta 366 días), revisa la lista y marca las actividades que quieras añadir. El proceso usa el cliente comunitario `garminconnect`.
+
+### Enviar el plan semanal por correo
+
+En **Mi plan**, el botón **Enviar semana actual por correo** manda manualmente el calendario de lunes a domingo a `mgcm2812@gmail.com`. Incluye las sesiones programadas, instrucciones y ejercicios de fuerza. Para habilitarlo, copia `.env.example` a `.env` y configura `SMTP_USER` con una cuenta Gmail y `SMTP_PASS` con una contraseña de aplicación de Google. No uses la contraseña habitual de Gmail. El servidor, puerto y TLS ya están configurados para Gmail. Deja `SMTP_FROM` igual a `SMTP_USER`, salvo que tengas configurado un alias de envío autorizado en Gmail. Reinicia la aplicación después de modificar `.env`. El archivo `.env` está excluido de Git y las credenciales no se guardan en la base de datos ni se envían al navegador.
 
 El acceso local usa HTTP y no configura TLS. Úsalo solo en una red privada de confianza y no publiques ni redirijas el puerto a Internet.
 
@@ -38,4 +51,4 @@ Los archivos importados se procesan localmente. GPX aporta ruta, distancia calcu
 
 ## Alcance
 
-La planificación inicial cubre metas de 5K, 10K y media maratón, con progresión por fases y semanas de descarga. La reevaluación local propone ajustes según RPE, molestias y sesiones omitidas; requiere confirmación y conserva la versión anterior. No sincroniza directamente con Garmin Connect.
+La planificación inicial cubre metas de 5K, 10K y media maratón, con progresión por fases y semanas de descarga. La reevaluación local propone ajustes según RPE, molestias y sesiones omitidas; requiere confirmación y conserva la versión anterior.

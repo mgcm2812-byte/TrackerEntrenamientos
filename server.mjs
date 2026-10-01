@@ -9,13 +9,17 @@ import {
   createHash,
 } from "node:crypto";
 import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { XMLParser } from "fast-xml-parser";
 import FitParser from "fit-file-parser";
-import { generateHybridPlan, assessWeeklyAdaptation, ALGORITHM_CONFIG } from "./algorithm.mjs";
+import nodemailer from "nodemailer";
+import { generateHybridPlan, assessWeeklyAdaptation, refreshRunSessionPrescription, ALGORITHM_CONFIG } from "./algorithm.mjs";
 
 const scrypt = promisify(scryptCb);
 const root = dirname(fileURLToPath(import.meta.url));
+try { process.loadEnvFile(join(root, ".env")); }
+catch (error) { if (error?.code !== "ENOENT") throw error; }
 const dataDir = resolve(process.env.DATA_DIR || join(root, "data"));
 mkdirSync(dataDir, { recursive: true });
 const db = new DatabaseSync(join(dataDir, "stride.sqlite"));
@@ -77,6 +81,100 @@ const sessionTtl = 12 * 60 * 60 * 1000;
 const port = Number(
   process.env.PORT || (process.env.NODE_ENV === "production" ? 4178 : 4178),
 );
+const garminOperations = new Map();
+const garminTokenDir = (userId) => join(dataDir, "garmin", String(userId));
+const garminTokenFile = (userId) => join(garminTokenDir(userId), "garmin_tokens.json");
+function isLocalBrowser(req) {
+  const origin = req.headers.origin;
+  const hostHeader = origin || req.headers.host || "";
+  try {
+    const hostname = new URL(hostHeader.includes("://") ? hostHeader : `http://${hostHeader}`).hostname.toLowerCase();
+    return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(hostname);
+  } catch {
+    return false;
+  }
+}
+function isValidGarminRange(from, to) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from || "") || !/^\d{4}-\d{2}-\d{2}$/.test(to || "") || from > to) return false;
+  const start = new Date(`${from}T00:00:00Z`);
+  const end = new Date(`${to}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start.toISOString().slice(0, 10) !== from || end.toISOString().slice(0, 10) !== to) return false;
+  return (end.getTime() - start.getTime()) / 86400000 <= 365;
+}
+const weeklyEmailRecipient = "mgcm2812@gmail.com";
+function smtpSettings() {
+  const port = Number(process.env.SMTP_PORT || 465);
+  return {
+    host: process.env.SMTP_HOST || "smtp.gmail.com",
+    port,
+    secure: process.env.SMTP_SECURE ? process.env.SMTP_SECURE.toLowerCase() === "true" : port === 465,
+    user: process.env.SMTP_USER || "",
+    pass: (process.env.SMTP_PASS || "").replace(/\s/g, ""),
+    from: process.env.SMTP_FROM || process.env.SMTP_USER || "",
+  };
+}
+function currentWeekRange() {
+  const now = new Date();
+  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const key = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  return { from: key(monday), to: key(sunday) };
+}
+function emailEscape(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+}
+function weeklyPlanEmail(plan, sessions, range) {
+  const fmtDate = (date) => new Intl.DateTimeFormat("es-ES", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" }).format(new Date(`${date}T12:00:00Z`));
+  const duration = (minutes) => {
+    const total = Math.max(0, Math.round(Number(minutes) || 0));
+    const hours = Math.floor(total / 60);
+    return hours ? `${hours} h${total % 60 ? ` ${total % 60} min` : ""}` : `${total} min`;
+  };
+  const distance = (km) => km == null ? "—" : `${Number(km).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km`;
+  const statusLabel = (status) => status === "completed" ? "Completada" : status === "skipped" ? "Omitida" : "Pendiente";
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(`${range.from}T12:00:00Z`);
+    date.setUTCDate(date.getUTCDate() + index);
+    return date.toISOString().slice(0, 10);
+  });
+  const cards = days.map((date) => {
+    const items = sessions.filter((session) => session.date === date);
+    const dateHeading = fmtDate(date);
+    if (!items.length) return { date, text: `${dateHeading}\nDescanso.`, html: `<tr><td style="padding:15px 16px;border-bottom:1px solid #edf1ec"><strong style="text-transform:capitalize">${emailEscape(dateHeading)}</strong><p style="margin:5px 0 0;color:#738078">Descanso</p></td></tr>` };
+    const text = items.map((session) => {
+      const environment = session.environment === "treadmill" ? "Cinta" : session.environment === "outdoor" ? "Exterior" : "";
+      const kind = session.type === "strength" ? "Fuerza" : session.type === "race" ? "Competición" : "Carrera";
+      const stats = [`Duración: ${duration(session.durationMin)}`, `Distancia: ${distance(session.distanceKm)}`, `Esfuerzo: ${session.effort || "—"}`, `Estado: ${statusLabel(session.status)}`].join(" · ");
+      const exercises = (session.strengthExercises || []).map((exercise) => `  • ${exercise.name}: ${exercise.sets} × ${exercise.reps} · RIR ${exercise.rir} · descanso ${exercise.restSec} s`).join("\n");
+      return `${session.title}\n${kind}${environment ? ` · ${environment}` : ""} · ${stats}\n${session.details || ""}${exercises ? `\nEjercicios:\n${exercises}` : ""}`;
+    }).join("\n\n");
+    const htmlSessions = items.map((session) => {
+      const environment = session.environment === "treadmill" ? " · Cinta" : session.environment === "outdoor" ? " · Exterior" : "";
+      const kind = session.type === "strength" ? "Fuerza" : session.type === "race" ? "Competición" : "Carrera";
+      const exercises = (session.strengthExercises || []).length ? `<ul style="padding-left:20px;margin:8px 0">${session.strengthExercises.map((exercise) => `<li style="margin:4px 0">${emailEscape(exercise.name)} · ${emailEscape(exercise.sets)} × ${emailEscape(exercise.reps)} · RIR ${emailEscape(exercise.rir)} · descanso ${emailEscape(exercise.restSec)} s</li>`).join("")}</ul>` : "";
+      return `<div style="padding:12px 0;border-top:1px solid #edf1ec"><strong>${emailEscape(session.title)}</strong><div style="margin:5px 0;color:#55735f;font-size:13px">${kind}${environment} · ${emailEscape(duration(session.durationMin))} · ${emailEscape(distance(session.distanceKm))} · ${emailEscape(statusLabel(session.status))}</div>${session.effort ? `<p style="margin:5px 0;font-size:13px"><b>Esfuerzo:</b> ${emailEscape(session.effort)}</p>` : ""}<p style="margin:6px 0;line-height:1.55;white-space:pre-line">${emailEscape(session.details || "")}</p>${exercises}</div>`;
+    }).join("");
+    return { date, text: `${dateHeading}\n${text}`, html: `<tr><td style="padding:15px 16px;border-bottom:1px solid #edf1ec"><strong style="text-transform:capitalize">${emailEscape(dateHeading)}</strong>${htmlSessions}</td></tr>` };
+  });
+  const formattedRange = `${new Intl.DateTimeFormat("es-ES", { day: "numeric", month: "long", timeZone: "UTC" }).format(new Date(`${range.from}T12:00:00Z`))} – ${new Intl.DateTimeFormat("es-ES", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${range.to}T12:00:00Z`))}`;
+  const subject = `Tu plan de entrenamiento · ${formattedRange}`;
+  const text = `Tu semana de entrenamiento\n${formattedRange}\nPlan v${plan.version}\n\n${cards.map((day) => day.text).join("\n\n────────────────────────\n\n")}\n\nEnviado desde Rompesuelas.`;
+  const html = `<div style="background:#f5f7f2;padding:24px 12px;font-family:Arial,sans-serif;color:#26372c"><div style="max-width:680px;margin:0 auto;background:#fff;border:1px solid #e4ebe2;border-radius:16px;overflow:hidden"><div style="padding:22px 20px;background:linear-gradient(120deg,#e8f2e8,#f8f5e9)"><div style="font-size:11px;letter-spacing:1.5px;color:#597360">ROMPESUELAS · PLAN SEMANAL</div><h1 style="font-size:23px;margin:8px 0 4px">Tu entrenamiento de esta semana</h1><div style="color:#61736a">${emailEscape(formattedRange)} · Plan v${emailEscape(plan.version)}</div></div><table role="presentation" style="width:100%;border-collapse:collapse">${cards.map((day) => day.html).join("")}</table><div style="padding:14px 16px;color:#809087;font-size:12px">Enviado desde Rompesuelas.</div></div></div>`;
+  return { subject, text, html };
+}
+function garminBridge(args, input) {
+  const python = process.env.GARMIN_PYTHON || "python";
+  const child = spawn(python, [join(root, "garmin_bridge.py"), ...args], {
+    cwd: root,
+    stdio: ["pipe", "pipe", "ignore"],
+    windowsHide: true,
+  });
+  child.on("error", () => {});
+  child.stdin.end(JSON.stringify(input));
+  return child;
+}
 
 function json(res, status, body, extra = {}) {
   res.writeHead(status, {
@@ -98,6 +196,19 @@ function scaleSessionDuration(session, duration) {
   if (session.sessionLoad) session.sessionLoad = Math.round(session.sessionLoad * ratio);
   if (session.impactLoad) session.impactLoad = Math.round(session.impactLoad * ratio);
   return session;
+}
+function reduceStrengthSession(session, suffix = "") {
+  session.title = "Fuerza ligera · volumen reducido";
+  session.effort = "RIR 4 · ligero, sin fallo";
+  if (Array.isArray(session.strengthExercises)) {
+    session.strengthExercises = session.strengthExercises.map((exercise) => ({ ...exercise, sets: Math.max(1, Number(exercise.sets || 1) - 1), rir: 4 }));
+    const prescription = session.strengthExercises.map((exercise) => `${exercise.name} (${exercise.pattern}) · ${exercise.sets} × ${exercise.reps} · RIR ${exercise.rir}`).join("; ");
+    const warmupAt = session.details.indexOf(". Calentamiento:");
+    const instructions = warmupAt >= 0 ? session.details.slice(warmupAt) : ". Calentamiento suave, técnica controlada y sin dolor.";
+    session.details = `${prescription}${instructions}${suffix}`;
+  } else {
+    session.details = session.details.replace(/(\d+) ×/g, (_, count) => `${Math.max(1, Number(count) - 1)} ×`) + suffix;
+  }
 }
 async function bodyBuffer(req, max = 8 * 1024 * 1024) {
   const chunks = [];
@@ -214,8 +325,10 @@ function activities(userId, includeFitData = false) {
     .all(userId)
     .map((row) => {
       const activity = JSON.parse(row.data);
-      if (!includeFitData) delete activity.fitData;
-      return { id: row.id, createdAt: row.created_at, ...activity };
+      if (!includeFitData) { delete activity.fitData; delete activity.garminSummary; }
+      // Keep the database key authoritative. Garmin's external activity ID is
+      // stored separately as garminActivityId.
+      return { ...activity, id: Number(row.id), createdAt: row.created_at };
     });
 }
 function saveSingleton(table, userId, data) {
@@ -236,20 +349,101 @@ const days = [
   "Domingo",
 ];
 const strengthCatalog = {
-  divisions: ["Torso/Pierna", "FullBody", "Tirón/Empuje/Pierna"],
+  divisions: ["Torso/Pierna", "Empuje/Tirón/Pierna", "Cuerpo completo"],
   groups: {
-    Espalda: ["Dominadas", "Jalón", "Remo en máquina", "Remo gironda"],
-    Pecho: ["Press en máquina inclinado", "Press en máquina", "Press con mancuernas", "Fondos paralelas", "Aperturas"],
-    Hombro: ["Press militar máquina", "Press militar mancuernas", "Elevaciones laterales mancuernas", "Pájaros en máquina"],
-    Brazo: ["Curl bíceps mancuerna", "Extensión tríceps polea", "Curl bíceps barra", "Press tríceps barra"],
-    Pierna: ["Prensa", "Sentadilla multipower", "Hip Thrust", "Prensa horizontal", "Extensiones cuádriceps", "Curl femoral tumbado", "Curl femoral sentado", "Abductor", "Adductor", "Gemelo en máquina"],
-    Core: ["Planchas", "Crunch abdominal", "Press Pallof"],
+    "Pierna y cadera": [
+      { name: "Sentadilla goblet", pattern: "Rodilla bilateral", equipment: ["Mancuernas"], role: "base", complexity: "básica" },
+      { name: "Sentadilla con barra", pattern: "Rodilla bilateral", equipment: ["Barra", "Rack"], role: "base", complexity: "técnica" },
+      { name: "Prensa de piernas", pattern: "Rodilla bilateral", equipment: ["Máquina de gimnasio"], role: "base", complexity: "básica" },
+      { name: "Sentadilla en multipower", pattern: "Rodilla bilateral", equipment: ["Máquina Smith"], role: "alternativa", complexity: "básica" },
+      { name: "Split squat", pattern: "Rodilla unilateral", equipment: ["Peso corporal", "Mancuernas"], role: "base", complexity: "básica" },
+      { name: "Zancada hacia atrás", pattern: "Rodilla unilateral", equipment: ["Peso corporal", "Mancuernas"], role: "base", complexity: "básica" },
+      { name: "Step-up bajo", pattern: "Rodilla unilateral", equipment: ["Banco/cajón"], role: "base", complexity: "básica" },
+      { name: "Prensa unilateral", pattern: "Rodilla unilateral", equipment: ["Máquina de gimnasio"], role: "alternativa", complexity: "básica" },
+      { name: "Peso muerto rumano con mancuernas", pattern: "Bisagra de cadera", equipment: ["Mancuernas"], role: "base", complexity: "básica" },
+      { name: "Peso muerto rumano con barra", pattern: "Bisagra de cadera", equipment: ["Barra"], role: "base", complexity: "técnica" },
+      { name: "Pull-through en polea", pattern: "Bisagra de cadera", equipment: ["Polea"], role: "alternativa", complexity: "básica" },
+      { name: "Extensión de cadera en banco", pattern: "Bisagra de cadera", equipment: ["Banco romano"], role: "alternativa", complexity: "básica" },
+      { name: "Hip thrust con barra", pattern: "Extensión de cadera", equipment: ["Barra", "Banco"], role: "base", complexity: "básica" },
+      { name: "Hip thrust en máquina", pattern: "Extensión de cadera", equipment: ["Máquina de gimnasio"], role: "alternativa", complexity: "básica" },
+      { name: "Puente de glúteos", pattern: "Extensión de cadera", equipment: ["Peso corporal"], role: "alternativa", complexity: "básica" },
+      { name: "Curl femoral sentado", pattern: "Flexión de rodilla", equipment: ["Máquina de gimnasio"], role: "base", complexity: "básica" },
+      { name: "Curl femoral tumbado", pattern: "Flexión de rodilla", equipment: ["Máquina de gimnasio"], role: "alternativa", complexity: "básica" },
+      { name: "Extensión de cuádriceps en máquina", pattern: "Extensión de rodilla", equipment: ["Máquina de gimnasio"], role: "opcional", complexity: "básica" },
+      { name: "Abducción de cadera en máquina", pattern: "Abducción de cadera", equipment: ["Máquina de gimnasio"], role: "opcional", complexity: "básica" },
+      { name: "Aducción de cadera en máquina", pattern: "Aducción de cadera", equipment: ["Máquina de gimnasio"], role: "opcional", complexity: "básica" },
+      { name: "Elevación de gemelos de pie", pattern: "Flexión plantar de tobillo", equipment: ["Peso corporal", "Mancuernas"], role: "base", complexity: "básica" },
+      { name: "Gemelo sentado en máquina", pattern: "Flexión plantar de tobillo", equipment: ["Máquina de gimnasio"], role: "alternativa", complexity: "básica" },
+      { name: "Gemelo sentado con mancuerna", pattern: "Flexión plantar de tobillo", equipment: ["Mancuernas", "Banco"], role: "alternativa", complexity: "básica" },
+      { name: "Gemelo en prensa", pattern: "Flexión plantar de tobillo", equipment: ["Prensa de piernas"], role: "alternativa", complexity: "básica" },
+      { name: "Tibialis raise", pattern: "Dorsiflexión de tobillo", equipment: ["Peso corporal"], role: "opcional", complexity: "básica" },
+      { name: "Dorsiflexión con banda", pattern: "Dorsiflexión de tobillo", equipment: ["Banda elástica"], role: "opcional", complexity: "básica" },
+    ],
+    Torso: [
+      { name: "Press de pecho en máquina", pattern: "Empuje horizontal", equipment: ["Máquina de gimnasio"], role: "base", complexity: "básica" },
+      { name: "Press banca con mancuernas", pattern: "Empuje horizontal", equipment: ["Mancuernas", "Banco"], role: "base", complexity: "básica" },
+      { name: "Press banca con barra", pattern: "Empuje horizontal", equipment: ["Barra", "Banco"], role: "alternativa", complexity: "técnica" },
+      { name: "Press inclinado con mancuernas", pattern: "Empuje inclinado", equipment: ["Mancuernas", "Banco inclinado"], role: "base", complexity: "básica" },
+      { name: "Press inclinado en máquina", pattern: "Empuje inclinado", equipment: ["Máquina de gimnasio"], role: "base", complexity: "básica" },
+      { name: "Flexión inclinada", pattern: "Empuje inclinado", equipment: ["Banco/cajón"], role: "alternativa", complexity: "básica" },
+      { name: "Press hombro con mancuernas", pattern: "Empuje vertical", equipment: ["Mancuernas"], role: "opcional", complexity: "básica" },
+      { name: "Press hombro en máquina", pattern: "Empuje vertical", equipment: ["Máquina de gimnasio"], role: "opcional", complexity: "básica" },
+      { name: "Jalón al pecho", pattern: "Tirón vertical", equipment: ["Polea"], role: "base", complexity: "básica" },
+      { name: "Dominada asistida", pattern: "Tirón vertical", equipment: ["Máquina asistida"], role: "alternativa", complexity: "básica" },
+      { name: "Dominada libre", pattern: "Tirón vertical", equipment: ["Barra de dominadas"], role: "alternativa", complexity: "técnica" },
+      { name: "Remo sentado en polea", pattern: "Tirón horizontal", equipment: ["Polea"], role: "base", complexity: "básica" },
+      { name: "Remo con pecho apoyado en máquina", pattern: "Tirón horizontal", equipment: ["Máquina de gimnasio"], role: "base", complexity: "básica" },
+      { name: "Remo con pecho apoyado con mancuernas", pattern: "Tirón horizontal", equipment: ["Banco inclinado", "Mancuernas"], role: "base", complexity: "básica" },
+      { name: "Remo con mancuerna apoyado", pattern: "Tirón horizontal", equipment: ["Mancuerna", "Banco"], role: "alternativa", complexity: "básica" },
+      { name: "Remo con banda elástica", pattern: "Tirón horizontal", equipment: ["Banda elástica"], role: "alternativa", complexity: "básica" },
+      { name: "Elevación lateral", pattern: "Deltoides lateral", equipment: ["Mancuernas"], role: "opcional", complexity: "básica" },
+      { name: "Pájaro en máquina", pattern: "Deltoides posterior", equipment: ["Máquina de gimnasio"], role: "opcional", complexity: "básica" },
+      { name: "Pájaro en polea", pattern: "Deltoides posterior", equipment: ["Polea"], role: "opcional", complexity: "básica" },
+      { name: "Curl de bíceps con mancuerna", pattern: "Flexión de codo", equipment: ["Mancuernas"], role: "opcional", complexity: "básica" },
+      { name: "Curl de bíceps en polea", pattern: "Flexión de codo", equipment: ["Polea"], role: "opcional", complexity: "básica" },
+      { name: "Curl con barra EZ", pattern: "Flexión de codo", equipment: ["Barra EZ"], role: "opcional", complexity: "básica" },
+      { name: "Extensión de tríceps en polea", pattern: "Extensión de codo", equipment: ["Polea"], role: "opcional", complexity: "básica" },
+      { name: "Extensión de tríceps sobre cabeza en polea", pattern: "Extensión de codo", equipment: ["Polea"], role: "opcional", complexity: "básica" },
+    ],
+    Tronco: [
+      { name: "Plancha", pattern: "Estabilidad anterior", equipment: ["Peso corporal"], role: "opcional", complexity: "básica" },
+      { name: "Dead bug", pattern: "Estabilidad anterior", equipment: ["Peso corporal"], role: "opcional", complexity: "básica" },
+      { name: "Pallof press", pattern: "Antirrotación", equipment: ["Polea", "Banda elástica"], role: "opcional", complexity: "básica" },
+      { name: "Crunch controlado", pattern: "Flexión de tronco", equipment: ["Peso corporal"], role: "opcional", complexity: "básica" },
+    ],
   },
 };
-const defaultStrengthConfig = { division: "Torso/Pierna", exercises: Object.values(strengthCatalog.groups).flat() };
+const defaultStrengthConfig = { division: "Cuerpo completo", exercises: Object.values(strengthCatalog.groups).flat().map((exercise) => exercise.name) };
+const legacyStrengthExerciseNames = {
+  "Dominadas": "Dominada asistida", "Jalón": "Jalón al pecho", "Remo en máquina": "Remo sentado en polea", "Remo gironda": "Remo sentado en polea",
+  "Press en máquina inclinado": "Press inclinado en máquina", "Press en máquina": "Press de pecho en máquina", "Press con mancuernas": "Press banca con mancuernas",
+  "Fondos paralelas": "Press banca con mancuernas", "Aperturas": "Press inclinado con mancuernas", "Press militar máquina": "Press hombro en máquina", "Press militar mancuernas": "Press hombro con mancuernas",
+  "Elevaciones laterales mancuernas": "Elevación lateral", "Pájaros en máquina": "Pájaro en máquina", "Curl bíceps mancuerna": "Curl de bíceps con mancuerna", "Extensión tríceps polea": "Extensión de tríceps en polea",
+  "Curl bíceps barra": "Curl con barra EZ", "Press tríceps barra": "Extensión de tríceps sobre cabeza en polea", "Prensa": "Prensa de piernas", "Sentadilla multipower": "Sentadilla en multipower", "Hip Thrust": "Hip thrust con barra",
+  "Prensa horizontal": "Prensa de piernas", "Extensiones cuádriceps": "Extensión de cuádriceps en máquina", "Curl femoral tumbado": "Curl femoral tumbado", "Curl femoral sentado": "Curl femoral sentado", "Abductor": "Abducción de cadera en máquina", "Adductor": "Aducción de cadera en máquina", "Gemelo en máquina": "Elevación de gemelos de pie",
+  "Planchas": "Plancha", "Crunch abdominal": "Crunch controlado", "Press Pallof": "Pallof press",
+};
+function normalizedStrengthConfig(config = strengthConfig()) {
+  const names = new Set(Object.values(strengthCatalog.groups).flat().map((exercise) => exercise.name));
+  const migrationDecisions = [];
+  const exercises = [...new Set((config.exercises || []).map((name) => {
+    const mapped = legacyStrengthExerciseNames[name] || name;
+    if (mapped !== name) migrationDecisions.push({ code: "STRENGTH_LEGACY_EXERCISE_MAPPED", ruleId: "STRENGTH-MIGRATION-001", reason: `${name} se normaliza a ${mapped} para nuevos planes.` });
+    else if (!names.has(name)) migrationDecisions.push({ code: "STRENGTH_LEGACY_EXERCISE_UNAVAILABLE", ruleId: "STRENGTH-MIGRATION-002", reason: `${name} no tiene equivalencia directa en el catálogo actual y no se incluye en nuevos planes.` });
+    return mapped;
+  }).filter((name) => names.has(name)))];
+  const division = ({ FullBody: "Cuerpo completo", "Tirón/Empuje/Pierna": "Empuje/Tirón/Pierna" })[config.division] || config.division;
+  if (division !== config.division) migrationDecisions.push({ code: "STRENGTH_LEGACY_DIVISION_MAPPED", ruleId: "STRENGTH-MIGRATION-001", reason: `La división ${config.division} se normaliza a ${division} para planes nuevos.` });
+  return { ...config, division: strengthCatalog.divisions.includes(division) ? division : defaultStrengthConfig.division, exercises: exercises.length ? exercises : defaultStrengthConfig.exercises, migrationDecisions };
+}
 function strengthConfig() {
   const row = db.prepare("SELECT data FROM app_settings WHERE key='strength'").get();
-  return row ? JSON.parse(row.data) : defaultStrengthConfig;
+  return normalizedStrengthConfig(row ? JSON.parse(row.data) : defaultStrengthConfig);
+}
+const defaultAiConfig = { enabled: false, apiKey: "", model: "gpt-4.1-mini", temperature: 0.3, topP: 1, maxCompletionTokens: 4000, timeoutSeconds: 60, jsonMode: true };
+function aiConfig() {
+  const row = db.prepare("SELECT data FROM app_settings WHERE key='ai'").get();
+  return row ? { ...defaultAiConfig, ...JSON.parse(row.data) } : defaultAiConfig;
 }
 function mondayOf(date) {
   const d = new Date(date);
@@ -314,6 +508,10 @@ async function parseActivity(buffer, filename) {
     for (let i = 1; i < coords.length; i++)
       km += haversine(coords[i - 1], coords[i]);
     const validTimes = coords.map((p) => p.time).filter(Number.isFinite);
+    const durationSeconds =
+      validTimes.length > 1
+        ? Math.round((Math.max(...validTimes) - Math.min(...validTimes)) / 1000)
+        : null;
     data = {
       source: "GPX",
       date: validTimes.length
@@ -321,12 +519,8 @@ async function parseActivity(buffer, filename) {
         : new Date().toISOString().slice(0, 10),
       type: "run",
       distanceKm: Math.round(km * 100) / 100,
-      durationMin:
-        validTimes.length > 1
-          ? Math.round(
-              (Math.max(...validTimes) - Math.min(...validTimes)) / 60000,
-            )
-          : null,
+      durationSeconds,
+      durationMin: durationSeconds !== null ? durationSeconds / 60 : null,
       avgHeartRate: null,
       note: "Importado desde GPX. Comprueba la duración y completa el esfuerzo percibido.",
     };
@@ -365,6 +559,9 @@ async function parseActivity(buffer, filename) {
       : /cycling|ride|swim|walking|hiking/.test(sport)
         ? "other"
         : "run";
+    const durationSeconds = Math.round(
+      Number(session.total_elapsed_time || session.total_timer_time || 0),
+    );
     data = {
       source: "FIT",
       date: Number.isNaN(startTime.getTime())
@@ -372,11 +569,8 @@ async function parseActivity(buffer, filename) {
         : startTime.toISOString().slice(0, 10),
       type,
       distanceKm: Number(session.total_distance) || null,
-      durationMin:
-        Math.round(
-          Number(session.total_elapsed_time || session.total_timer_time || 0) /
-            60,
-        ) || null,
+      durationSeconds: durationSeconds || null,
+      durationMin: durationSeconds ? durationSeconds / 60 : null,
       avgHeartRate: Number(session.avg_heart_rate) || null,
       maxHeartRate: Number(session.max_heart_rate) || null,
       note: "Importado desde FIT. Revisa los datos y añade RPE y sensaciones.",
@@ -553,6 +747,198 @@ const server = createServer(async (req, res) => {
       if (!session)
         return json(res, 401, { error: "Inicia sesión para continuar." });
       const userId = session.userId;
+      if (pathname === "/api/email/week/status" && req.method === "GET") {
+        const smtp = smtpSettings();
+        const missing = [!smtp.user && "SMTP_USER", !smtp.pass && "SMTP_PASS"].filter(Boolean);
+        const gmailPasswordIssue = /smtp\.gmail\.com/i.test(smtp.host) && Boolean(smtp.pass) && smtp.pass.length !== 16;
+        return json(res, 200, { configured: missing.length === 0 && !gmailPasswordIssue, missing, issue: gmailPasswordIssue ? "gmail_app_password_length" : null, recipient: weeklyEmailRecipient, range: currentWeekRange() });
+      }
+      if (pathname === "/api/email/week/send" && req.method === "POST") {
+        const smtp = smtpSettings();
+        if (!smtp.user || !smtp.pass)
+          return json(res, 503, { error: "Configura SMTP_USER y SMTP_PASS en el archivo .env local y reinicia la aplicación." });
+        if (/smtp\.gmail\.com/i.test(smtp.host) && smtp.pass.length !== 16)
+          return json(res, 503, { error: "SMTP_PASS debe ser la contraseña de aplicación de Gmail de 16 caracteres, no la contraseña habitual de la cuenta. Revisa .env y reinicia la aplicación." });
+        if (!Number.isInteger(smtp.port) || smtp.port < 1 || smtp.port > 65535 || !smtp.from)
+          return json(res, 503, { error: "La configuración SMTP local no es válida. Revisa SMTP_HOST, SMTP_PORT y SMTP_FROM." });
+        const plan = latestPlan(userId);
+        if (!plan) return json(res, 404, { error: "Todavía no hay un plan de entrenamiento para enviar." });
+        const range = currentWeekRange();
+        const weeklySessions = plan.sessions.filter((item) => item.date >= range.from && item.date <= range.to).sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title));
+        if (!weeklySessions.length)
+          return json(res, 409, { error: "El plan activo no contiene sesiones programadas para la semana en curso." });
+        const message = weeklyPlanEmail(plan, weeklySessions, range);
+        const transporter = nodemailer.createTransport({
+          host: smtp.host,
+          port: smtp.port,
+          secure: smtp.secure,
+          auth: { user: smtp.user, pass: smtp.pass },
+          connectionTimeout: 15000,
+          greetingTimeout: 15000,
+          socketTimeout: 30000,
+          tls: { rejectUnauthorized: true },
+        });
+        try {
+          await transporter.sendMail({ from: smtp.from, to: weeklyEmailRecipient, subject: message.subject, text: message.text, html: message.html });
+        } catch (error) {
+          const code = String(error?.code || "");
+          const responseCode = Number(error?.responseCode || 0);
+          console.error("No se pudo enviar el correo semanal por SMTP:", code || responseCode || "error desconocido");
+          const message = code === "EAUTH" || responseCode === 534 || responseCode === 535
+            ? "Gmail rechazó el acceso SMTP. Comprueba que SMTP_PASS sea una contraseña de aplicación vigente de 16 caracteres y que SMTP_USER sea la cuenta que la generó."
+            : code === "ETLS" || code === "ESOCKET" && /tls|certificate/i.test(String(error?.message || ""))
+              ? "Falló la conexión TLS con el servidor SMTP. Comprueba SMTP_PORT y SMTP_SECURE (Gmail usa normalmente puerto 465 con SMTP_SECURE=true)."
+              : ["ECONNECTION", "ETIMEDOUT", "ESOCKET", "EDNS"].includes(code)
+                ? "No se pudo conectar con el servidor SMTP. Comprueba la conexión a Internet, el servidor y el puerto; algunas redes bloquean SMTP."
+                : "No se pudo enviar el correo. Revisa la configuración SMTP y que la dirección remitente esté autorizada por el servidor.";
+          return json(res, 502, { error: message });
+        } finally { transporter.close(); }
+        return json(res, 200, { ok: true, recipient: weeklyEmailRecipient, range, sessions: weeklySessions.length });
+      }
+      if (pathname.startsWith("/api/garmin") || pathname.startsWith("/api/activities/garmin")) {
+        if (!isLocalBrowser(req))
+          return json(res, 403, { error: "La conexión con Garmin solo está disponible desde este equipo." });
+      }
+      if (pathname === "/api/garmin/status" && req.method === "GET") {
+        const child = garminBridge(["status"], {});
+        let output = "";
+        child.stdout.setEncoding("utf8").on("data", (chunk) => { output += chunk; });
+        const status = await new Promise((resolveStatus) => child.on("close", () => {
+          try { resolveStatus(JSON.parse(output.trim())); }
+          catch { resolveStatus({ installed: false }); }
+        }));
+        return json(res, 200, { ...status, connected: existsSync(garminTokenFile(userId)), localOnly: true });
+      }
+      if (pathname === "/api/garmin/connect" && req.method === "POST") {
+        const { email, password } = await bodyJson(req);
+        if (typeof email !== "string" || !email.trim() || typeof password !== "string" || !password || password.length > 512)
+          return json(res, 400, { error: "Introduce el correo y la contraseña de Garmin Connect." });
+        const operationId = randomBytes(18).toString("hex");
+        const child = spawn(process.env.GARMIN_PYTHON || "python", [join(root, "garmin_bridge.py"), "auth", garminTokenDir(userId)], {
+          cwd: root, stdio: ["pipe", "pipe", "ignore"], windowsHide: true,
+        });
+        const operation = { userId, child, state: "connecting", error: null, buffer: "", expires: Date.now() + 5 * 60 * 1000 };
+        garminOperations.set(operationId, operation);
+        operation.timeout = setTimeout(() => {
+          if (operation.state === "connecting" || operation.state === "mfa_required") {
+            operation.state = "error"; operation.error = "La conexión tardó demasiado. Vuelve a intentarlo."; operation.child?.kill();
+          }
+        }, 5 * 60 * 1000);
+        child.stdout.setEncoding("utf8").on("data", (chunk) => {
+          operation.buffer += chunk;
+          let newline;
+          while ((newline = operation.buffer.indexOf("\n")) >= 0) {
+            const line = operation.buffer.slice(0, newline).trim(); operation.buffer = operation.buffer.slice(newline + 1);
+            try {
+              const event = JSON.parse(line);
+              if (event.event === "mfa_required") operation.state = "mfa_required";
+              else if (event.event === "connected") operation.state = "connected";
+              else if (event.event === "error") { operation.state = "error"; operation.error = event.message || "No se pudo iniciar sesión en Garmin Connect."; }
+            } catch { operation.state = "error"; operation.error = "Respuesta no válida del servicio de Garmin."; }
+          }
+        });
+        child.on("close", (code) => {
+          clearTimeout(operation.timeout);
+          if (operation.state === "connecting" || operation.state === "mfa_required") {
+            operation.state = code === 0 ? "connected" : "error";
+            if (code !== 0) operation.error ||= "No se pudo conectar. Comprueba los datos e inténtalo de nuevo.";
+          }
+          operation.child = null;
+        });
+        child.on("error", () => { operation.state = "error"; operation.error = "No se pudo iniciar Python. Comprueba GARMIN_PYTHON y la instalación local."; });
+        child.stdin.write(`${JSON.stringify({ email: email.trim(), password })}\n`);
+        return json(res, 202, { operationId });
+      }
+      const garminOperationRoute = pathname.match(/^\/api\/garmin\/connect\/([a-f0-9]+)$/);
+      if (garminOperationRoute && req.method === "GET") {
+        const operation = garminOperations.get(garminOperationRoute[1]);
+        if (!operation || operation.userId !== userId || operation.expires < Date.now()) return json(res, 404, { error: "La operación de conexión ya no está disponible." });
+        if (operation.state === "connected" && !existsSync(garminTokenFile(userId)))
+          return json(res, 200, { state: "error", error: "Garmin aceptó el acceso, pero no se pudieron guardar los tokens. Vuelve a conectar la cuenta." });
+        return json(res, 200, { state: operation.state, error: operation.error });
+      }
+      if (garminOperationRoute && req.method === "POST") {
+        const operation = garminOperations.get(garminOperationRoute[1]);
+        if (!operation || operation.userId !== userId || operation.expires < Date.now()) return json(res, 404, { error: "La operación de conexión ya no está disponible." });
+        if (operation.state !== "mfa_required" || !operation.child) return json(res, 409, { error: "Garmin no está esperando un código de verificación." });
+        const { code } = await bodyJson(req);
+        if (typeof code !== "string" || !/^[0-9\s-]{4,12}$/.test(code)) return json(res, 400, { error: "Introduce el código de verificación recibido." });
+        operation.state = "connecting";
+        operation.child.stdin.write(`${JSON.stringify({ mfa: code.replace(/[\s-]/g, "") })}\n`);
+        return json(res, 202, { ok: true });
+      }
+      if (garminOperationRoute && req.method === "DELETE") {
+        const operation = garminOperations.get(garminOperationRoute[1]);
+        if (operation?.userId === userId) { operation.child?.kill(); garminOperations.delete(garminOperationRoute[1]); }
+        return json(res, 200, { ok: true });
+      }
+      if (pathname === "/api/garmin/disconnect" && req.method === "POST") {
+        const { rmSync } = await import("node:fs");
+        rmSync(garminTokenDir(userId), { recursive: true, force: true });
+        return json(res, 200, { ok: true });
+      }
+      if (pathname === "/api/activities/garmin/preview" && req.method === "POST") {
+        const { from, to } = await bodyJson(req);
+        if (!isValidGarminRange(from, to))
+          return json(res, 400, { error: "Elige un rango válido de hasta 366 días." });
+        if (!existsSync(garminTokenFile(userId))) return json(res, 409, { error: "Conecta primero tu cuenta de Garmin Connect." });
+        const child = garminBridge(["activities", garminTokenDir(userId)], { from, to });
+        let stdout = ""; child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
+        const result = await new Promise((resolveResult) => child.on("close", (code) => {
+          try { resolveResult(code === 0 ? JSON.parse(stdout.trim()) : null); } catch { resolveResult(null); }
+        }));
+        if (!result || result.error) return json(res, 502, { error: result?.error || "No se pudieron recuperar las actividades de Garmin." });
+        const existingRows = db.prepare("SELECT file_hash,data FROM activities WHERE user_id=? AND file_hash LIKE 'garmin:%'").all(userId);
+        const existingByHash = new Map(existingRows.map((row) => [row.file_hash, JSON.parse(row.data)]));
+        return json(res, 200, { activities: result.activities.map((a) => {
+          const previous = existingByHash.get(`garmin:${a.id}`);
+          return { ...a, alreadyImported: Boolean(previous), needsDetailRefresh: Boolean(previous && !previous.garminDetailsVersion) };
+        }) });
+      }
+      if (pathname === "/api/activities/garmin/import" && req.method === "POST") {
+        const { from, to, activityIds } = await bodyJson(req);
+        if (!isValidGarminRange(from, to))
+          return json(res, 400, { error: "Elige un rango válido de hasta 366 días." });
+        if (!Array.isArray(activityIds) || !activityIds.length || activityIds.length > 500 || !activityIds.every((id) => /^\d+$/.test(String(id)))) return json(res, 400, { error: "Selecciona al menos una actividad válida." });
+        if (!existsSync(garminTokenFile(userId))) return json(res, 409, { error: "Conecta primero tu cuenta de Garmin Connect." });
+        const child = garminBridge(["activities", garminTokenDir(userId)], { from, to, activityIds: activityIds.map(String) });
+        let stdout = ""; child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
+        const result = await new Promise((resolveResult) => child.on("close", (code) => { try { resolveResult(code === 0 ? JSON.parse(stdout.trim()) : null); } catch { resolveResult(null); } }));
+        if (!result || result.error) return json(res, 502, { error: result?.error || "No se pudieron recuperar las actividades de Garmin." });
+        const wanted = new Set(activityIds.map(String)); let imported = 0; let updated = 0; let skipped = 0;
+        for (const a of result.activities) {
+          if (!wanted.has(String(a.id))) continue;
+          const externalGarminId = String(a.id);
+          const { id: _externalId, ...garminData } = a;
+          const fileHash = `garmin:${externalGarminId}`;
+          const activityType = String(a.activityType || "").toLowerCase();
+          const type = /run|running|treadmill|trail_run/.test(activityType) ? "run" : /strength|weight|fitness/.test(activityType) ? "strength" : "other";
+          const payload = { ...garminData, garminActivityId: externalGarminId, type, source: "Garmin Connect", filename: `garmin-${externalGarminId}`, fileHash, sessionName: a.name || "Actividad Garmin", distanceKm: a.distanceKm || null, durationMin: a.durationMin ?? null, durationSeconds: a.durationSeconds ?? null, avgHeartRate: a.avgHeartRate || null, maxHeartRate: a.maxHeartRate || null, elevationGain: a.elevationGain || null, rpe: null, soreness: "", painWorsening: false, painChangesGait: false, illness: false, poorSleep: false, fatigueHigh: false, note: "Importada directamente desde Garmin Connect." };
+          const existing = db.prepare("SELECT id,data FROM activities WHERE user_id=? AND file_hash=?").get(userId, fileHash);
+          if (existing) {
+            const previous = JSON.parse(existing.data);
+            if (previous.garminDetailsVersion) {
+              // Repair records imported before internal and Garmin IDs were
+              // separated, even when their detail payload is already current.
+              if (Object.hasOwn(previous, "id") || !previous.garminActivityId) {
+                const repaired = { ...previous, garminActivityId: previous.garminActivityId || externalGarminId };
+                delete repaired.id;
+                db.prepare("UPDATE activities SET data=? WHERE id=? AND user_id=?").run(JSON.stringify(repaired), existing.id, userId);
+                updated++;
+              } else skipped++;
+              continue;
+            }
+            const refreshed = { ...previous, ...payload, rpe: previous.rpe ?? null, soreness: previous.soreness || "", painWorsening: Boolean(previous.painWorsening), painChangesGait: Boolean(previous.painChangesGait), illness: Boolean(previous.illness), poorSleep: Boolean(previous.poorSleep), fatigueHigh: Boolean(previous.fatigueHigh), note: previous.note && previous.note !== "Importada directamente desde Garmin Connect." ? previous.note : payload.note };
+            delete refreshed.id;
+            db.prepare("UPDATE activities SET data=? WHERE id=? AND user_id=?").run(JSON.stringify(refreshed), existing.id, userId); updated++;
+            continue;
+          }
+          try { db.prepare("INSERT INTO activities(user_id,file_hash,created_at,data) VALUES(?,?,?,?)").run(userId, fileHash, new Date().toISOString(), JSON.stringify(payload)); imported++; }
+          catch (error) { if (String(error.message).includes("UNIQUE")) skipped++; else throw error; }
+        }
+        skipped += Math.max(0, wanted.size - imported - updated - skipped);
+        return json(res, 201, { imported, updated, skipped });
+      }
       if (pathname.startsWith("/api/admin/")) {
         if (!session.isAdmin)
           return json(res, 403, {
@@ -563,18 +949,38 @@ const server = createServer(async (req, res) => {
         if (pathname === "/api/admin/strength" && req.method === "PUT") {
           const config = await bodyJson(req);
           if (!Array.isArray(config.exercises)) return json(res,400,{error:"Selecciona ejercicios del catálogo."});
-          const allowed = new Set(Object.values(strengthCatalog.groups).flat());
+          const allowed = new Set(Object.values(strengthCatalog.groups).flat().map((exercise) => exercise.name));
           const selected = new Set(config.exercises || []);
-          const hasGroup = (group) => strengthCatalog.groups[group].some((name) => selected.has(name));
-          const coverage = config.division === "FullBody"
-            ? hasGroup("Pierna") && (hasGroup("Espalda") || hasGroup("Pecho")) && (hasGroup("Hombro") || hasGroup("Brazo"))
-            : config.division === "Torso/Pierna"
-              ? hasGroup("Pierna") && hasGroup("Espalda") && hasGroup("Pecho")
-              : hasGroup("Espalda") && hasGroup("Pecho") && hasGroup("Pierna");
-          if (!strengthCatalog.divisions.includes(config.division) || !Array.isArray(config.exercises) || !config.exercises.length || config.exercises.some((name) => !allowed.has(name)) || new Set(config.exercises).size !== config.exercises.length || !coverage)
-            return json(res, 400, { error: "La selección debe incluir ejercicios adecuados a cada parte de la división (torso y pierna; cuerpo completo; o tirón, empuje y pierna)." });
-          db.prepare("INSERT INTO app_settings(key,data) VALUES('strength',?) ON CONFLICT(key) DO UPDATE SET data=excluded.data").run(JSON.stringify(config));
+          const selectedPatterns = new Set(Object.values(strengthCatalog.groups).flat().filter((exercise) => selected.has(exercise.name)).map((exercise) => exercise.pattern));
+          const coverage = config.division === "Cuerpo completo"
+            ? selectedPatterns.has("Rodilla bilateral") && selectedPatterns.has("Bisagra de cadera") && selectedPatterns.has("Empuje horizontal") && selectedPatterns.has("Tirón horizontal")
+            : selectedPatterns.has("Rodilla bilateral") && selectedPatterns.has("Bisagra de cadera") && selectedPatterns.has("Flexión de rodilla") && selectedPatterns.has("Empuje horizontal") && selectedPatterns.has("Tirón horizontal") && selectedPatterns.has("Tirón vertical");
+          if (!strengthCatalog.divisions.includes(config.division) || !config.exercises.length || config.exercises.some((name) => !allowed.has(name)) || new Set(config.exercises).size !== config.exercises.length || !coverage)
+            return json(res, 400, { error: "La selección debe cubrir los patrones principales de la división. Cuerpo completo requiere rodilla, bisagra, empuje horizontal y tirón horizontal; torso/pierna y empuje/tirón/pierna requieren además flexión de rodilla y tirón vertical." });
+          db.prepare("INSERT INTO app_settings(key,data) VALUES('strength',?) ON CONFLICT(key) DO UPDATE SET data=excluded.data").run(JSON.stringify({ ...config, exercises: [...config.exercises] }));
           return json(res, 200, { ok: true });
+        }
+        if (pathname === "/api/admin/ai" && req.method === "GET") {
+          const { apiKey, ...config } = aiConfig();
+          return json(res, 200, { ...config, apiKeyConfigured: Boolean(apiKey) });
+        }
+        if (pathname === "/api/admin/ai" && req.method === "PUT") {
+          const input = await bodyJson(req);
+          const current = aiConfig();
+          const config = {
+            enabled: input.enabled === true,
+            apiKey: input.clearApiKey === true ? "" : typeof input.apiKey === "string" && input.apiKey.trim() ? input.apiKey.trim() : current.apiKey,
+            model: typeof input.model === "string" ? input.model.trim() : "",
+            temperature: Number(input.temperature),
+            topP: Number(input.topP),
+            maxCompletionTokens: Number(input.maxCompletionTokens),
+            timeoutSeconds: Number(input.timeoutSeconds),
+            jsonMode: input.jsonMode === true,
+          };
+          if (!config.model || config.model.length > 100 || !Number.isFinite(config.temperature) || config.temperature < 0 || config.temperature > 2 || !Number.isFinite(config.topP) || config.topP < 0 || config.topP > 1 || !Number.isInteger(config.maxCompletionTokens) || config.maxCompletionTokens < 1 || config.maxCompletionTokens > 32000 || !Number.isInteger(config.timeoutSeconds) || config.timeoutSeconds < 5 || config.timeoutSeconds > 300 || config.apiKey.length > 500)
+            return json(res, 400, { error: "Revisa el modelo, la temperatura, top P, los tokens, el tiempo de espera y la longitud de la API key." });
+          db.prepare("INSERT INTO app_settings(key,data) VALUES('ai',?) ON CONFLICT(key) DO UPDATE SET data=excluded.data").run(JSON.stringify(config));
+          return json(res, 200, { ok: true, apiKeyConfigured: Boolean(config.apiKey) });
         }
         if (pathname === "/api/admin/users" && req.method === "GET")
           return json(res, 200, {
@@ -645,6 +1051,22 @@ const server = createServer(async (req, res) => {
           profile: profile(userId),
           goal: goal(userId),
           plan: latestPlan(userId),
+          planHistory: db
+            .prepare("SELECT version, created_at AS createdAt, data FROM plans WHERE user_id=? ORDER BY version DESC")
+            .all(userId)
+            .map((row, index) => {
+              const plan = JSON.parse(row.data);
+              return {
+                version: row.version,
+                createdAt: plan.createdAt || row.createdAt,
+                savedAt: plan.savedAt || null,
+                restoredFromVersion: plan.restoredFromVersion || null,
+                goal: plan.goal || null,
+                weeks: plan.weeks || 0,
+                sessionCount: Array.isArray(plan.sessions) ? plan.sessions.length : 0,
+                isActive: index === 0,
+              };
+            }),
           planVersions: db
             .prepare(
               "SELECT version, created_at AS createdAt FROM plans WHERE user_id=? ORDER BY version DESC",
@@ -654,6 +1076,44 @@ const server = createServer(async (req, res) => {
           proposal: latestProposal(userId),
         });
       const activityDetailRoute = pathname.match(/^\/api\/activities\/(\d+)$/);
+      const activityAssignRoute = pathname.match(/^\/api\/activities\/(\d+)\/assign$/);
+      if (activityAssignRoute && req.method === "POST") {
+        const activityId = Number(activityAssignRoute[1]);
+        const { sessionId } = await bodyJson(req);
+        if (typeof sessionId !== "string" || !sessionId)
+          return json(res, 400, { error: "Selecciona una sesión válida del plan." });
+        const planRow = db.prepare("SELECT version,data FROM plans WHERE user_id=? ORDER BY version DESC LIMIT 1").get(userId);
+        if (!planRow) return json(res, 404, { error: "No hay un plan activo." });
+        const plan = JSON.parse(planRow.data);
+        const activityRow = db.prepare("SELECT id,data FROM activities WHERE id=? AND user_id=?").get(activityId, userId);
+        if (!activityRow) return json(res, 404, { error: "No se encontró esta actividad." });
+        const activity = JSON.parse(activityRow.data);
+        const session = plan.sessions.find((item) => item.id === sessionId);
+        if (!session) return json(res, 404, { error: "No se encontró la sesión en el plan activo." });
+        if (session.type === "strength" || session.status === "skipped")
+          return json(res, 409, { error: "Solo puedes asociar actividades a sesiones de carrera disponibles." });
+        if (session.activityId && Number(session.activityId) !== activityId)
+          return json(res, 409, { error: "Esta sesión ya tiene otra actividad asociada." });
+        if (activity.sessionId && activity.sessionId !== sessionId)
+          return json(res, 409, { error: "Esta actividad ya está asociada a otra sesión." });
+        for (const other of plan.sessions) {
+          if (other.id !== sessionId && Number(other.activityId) === activityId)
+            return json(res, 409, { error: "Esta actividad ya está asociada a otra sesión del plan." });
+        }
+        session.activityId = activityId;
+        session.activityFileName = activity.filename || activity.sessionName || activity.source || "Actividad del historial";
+        session.activityDate = activity.date;
+        activity.sessionId = session.id;
+        activity.sessionName = session.title;
+        activity.planVersion = Number(planRow.version);
+        db.exec("BEGIN");
+        try {
+          db.prepare("UPDATE activities SET data=? WHERE id=? AND user_id=?").run(JSON.stringify(activity), activityId, userId);
+          db.prepare("UPDATE plans SET data=? WHERE user_id=? AND version=?").run(JSON.stringify(plan), userId, planRow.version);
+          db.exec("COMMIT");
+        } catch (error) { db.exec("ROLLBACK"); throw error; }
+        return json(res, 200, { ok: true, activityId, sessionId, planVersion: Number(planRow.version) });
+      }
       if (activityDetailRoute && req.method === "GET") {
         const row = db
           .prepare(
@@ -663,10 +1123,42 @@ const server = createServer(async (req, res) => {
         if (!row)
           return json(res, 404, { error: "No se encontró esta actividad." });
         return json(res, 200, {
-          id: row.id,
-          createdAt: row.created_at,
           ...JSON.parse(row.data),
+          id: Number(row.id),
+          createdAt: row.created_at,
         });
+      }
+      if (activityDetailRoute && req.method === "DELETE") {
+        const activityId = Number(activityDetailRoute[1]);
+        const row = db.prepare("SELECT data FROM activities WHERE id=? AND user_id=?").get(activityId, userId);
+        if (!row) return json(res, 404, { error: "No se encontró esta actividad." });
+        const activity = JSON.parse(row.data);
+        if (!["FIT", "GPX", "GARMIN CONNECT"].includes(String(activity.source || "").toUpperCase()))
+          return json(res, 409, { error: "Solo se pueden borrar actividades importadas desde un archivo o Garmin Connect." });
+        let detachedSessions = 0;
+        db.exec("BEGIN");
+        try {
+          const plans = db.prepare("SELECT version,data FROM plans WHERE user_id=?").all(userId);
+          for (const planRow of plans) {
+            const plan = JSON.parse(planRow.data);
+            let changed = false;
+            for (const plannedSession of plan.sessions || []) {
+              if (Number(plannedSession.activityId) !== activityId) continue;
+              delete plannedSession.activityId;
+              delete plannedSession.activityFileName;
+              delete plannedSession.activityDate;
+              changed = true;
+              detachedSessions++;
+            }
+            if (changed) db.prepare("UPDATE plans SET data=? WHERE user_id=? AND version=?").run(JSON.stringify(plan), userId, planRow.version);
+          }
+          db.prepare("DELETE FROM activities WHERE id=? AND user_id=?").run(activityId, userId);
+          db.exec("COMMIT");
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+        return json(res, 200, { ok: true, deletedActivityId: activityId, detachedSessions });
       }
       if (
         pathname.startsWith("/api/adaptation/") &&
@@ -681,6 +1173,20 @@ const server = createServer(async (req, res) => {
       }
       if (pathname === "/api/profile" && req.method === "PUT") {
         const p = await bodyJson(req);
+        if (!Number.isFinite(Number(p.age)) || Number(p.age) < 18 || Number(p.age) > 100)
+          return json(res, 400, { error: "El perfil de planificación debe corresponder a una persona adulta (18 años o más)." });
+        for (const [minutesKey, dateKey, minMinutes, maxMinutes] of [
+          ["recent5kMin", "recent5kDate", 10, 120],
+          ["recent10kMin", "recent10kDate", 20, 240],
+          ["recentHalfMin", "recentHalfDate", 45, 600],
+        ]) {
+          const mark = p[minutesKey];
+          const markDate = p[dateKey];
+          if (mark !== undefined && mark !== "" && (!Number.isFinite(Number(mark)) || Number(mark) < minMinutes || Number(mark) > maxMinutes))
+            return json(res, 400, { error: `La marca ${minutesKey} está fuera del rango permitido.` });
+          if (markDate && (!/^\d{4}-\d{2}-\d{2}$/.test(markDate) || Number.isNaN(new Date(`${markDate}T00:00:00`).getTime()) || markDate > isoDay(new Date())))
+            return json(res, 400, { error: `La fecha ${dateKey} debe ser válida y no futura.` });
+        }
         const scheduleValid =
           Array.isArray(p.trainingSchedule) &&
           p.trainingSchedule.length === 7 &&
@@ -710,6 +1216,8 @@ const server = createServer(async (req, res) => {
           });
         if (!p.healthScreening || typeof p.healthScreening !== "object" || Object.values(p.healthScreening).some((value) => typeof value !== "boolean") || !p.precautionScreening || typeof p.precautionScreening !== "object" || Object.values(p.precautionScreening).some((value) => typeof value !== "boolean") || typeof p.healthScreeningReviewed !== "boolean")
           return json(res,400,{error:"Completa el cuestionario de seguridad con respuestas válidas."});
+        if (p.strengthEquipment !== undefined && (!Array.isArray(p.strengthEquipment) || p.strengthEquipment.some((item) => !["Mancuernas", "Banda elástica", "Banco/cajón", "Barra y discos", "Rack", "Barra EZ", "Barra de dominadas", "Banco romano"].includes(item)) || new Set(p.strengthEquipment).size !== p.strengthEquipment.length))
+          return json(res,400,{error:"El material de fuerza seleccionado no es válido."});
         if (
           !Number.isFinite(Number(p.weeklyKm)) ||
           Number(p.weeklyKm) < 0 ||
@@ -731,9 +1239,9 @@ const server = createServer(async (req, res) => {
       }
       if (pathname === "/api/goal" && req.method === "PUT") {
         const g = await bodyJson(req);
-        if (!["1", "1.609", "3", "5", "10", "21.1", "21.097", "42.195"].includes(String(g.distanceKm)) || !g.raceDate)
+        if (!["5", "10", "21.097"].includes(String(g.distanceKm)) || !g.raceDate)
           return json(res, 400, {
-            error: "Selecciona una distancia y fecha válidas.",
+            error: "Selecciona 5K, 10K o media maratón y una fecha válida.",
           });
         if (g.priority && !["finish_healthy","improve_fitness","time_goal"].includes(g.priority))
           return json(res,400,{error:"La prioridad del objetivo no es válida."});
@@ -761,12 +1269,18 @@ const server = createServer(async (req, res) => {
         return json(res, 200, { ok: true });
       }
       if (pathname === "/api/plans/generate" && req.method === "POST") {
+        const previous = db.prepare("SELECT version, data FROM plans WHERE user_id=? ORDER BY version DESC LIMIT 1").get(userId);
         const version = db
           .prepare(
             "SELECT COALESCE(MAX(version),0)+1 AS n FROM plans WHERE user_id=?",
           )
           .get(userId).n;
         const plan = generateHybridPlan(profile(userId), goal(userId), version, strengthConfig(), strengthCatalog, activities(userId));
+        if (previous) {
+          const previousPlan = JSON.parse(previous.data);
+          previousPlan.savedAt ||= new Date().toISOString();
+          db.prepare("UPDATE plans SET data=? WHERE user_id=? AND version=?").run(JSON.stringify(previousPlan), userId, previous.version);
+        }
         db.prepare(
           "INSERT INTO plans(user_id,version,created_at,data) VALUES(?,?,?,?)",
         ).run(userId, version, plan.generatedAt || new Date().toISOString(), JSON.stringify(plan));
@@ -774,6 +1288,69 @@ const server = createServer(async (req, res) => {
           "UPDATE proposals SET status='dismissed' WHERE user_id=? AND status='pending'",
         ).run(userId);
         return json(res, 201, { plan });
+      }
+      const planHistoryRoute = pathname.match(/^\/api\/plans\/(\d+)\/(save|restore|delete)$/);
+      if (planHistoryRoute) {
+        const sourceVersion = Number(planHistoryRoute[1]);
+        const action = planHistoryRoute[2];
+        const row = db.prepare("SELECT data FROM plans WHERE user_id=? AND version=?").get(userId, sourceVersion);
+        if (!row) return json(res, 404, { error: "No se encontró ese plan en tu histórico." });
+        if (action === "delete") {
+          if (req.method !== "DELETE") return json(res, 405, { error: "Método no permitido." });
+          if (latestPlan(userId)?.version === sourceVersion) return json(res, 409, { error: "No se puede borrar el plan activo. Recupera otra versión primero." });
+          db.prepare("DELETE FROM plans WHERE user_id=? AND version=?").run(userId, sourceVersion);
+          return json(res, 200, { ok: true, deletedVersion: sourceVersion });
+        }
+        if (req.method !== "POST") return json(res, 405, { error: "Método no permitido." });
+        const source = JSON.parse(row.data);
+        if (action === "save") {
+          if (latestPlan(userId)?.version !== sourceVersion) return json(res, 409, { error: "Solo puedes guardar manualmente el plan activo." });
+          source.savedAt ||= new Date().toISOString();
+          db.prepare("UPDATE plans SET data=? WHERE user_id=? AND version=?").run(JSON.stringify(source), userId, sourceVersion);
+          return json(res, 200, { plan: source });
+        }
+        const firstSessionDate = (source.sessions || []).filter((session) => session.type !== "race" && /^\d{4}-\d{2}-\d{2}$/.test(session.date || "")).map((session) => session.date).sort()[0];
+        if (!firstSessionDate) return json(res, 409, { error: "Este plan no contiene sesiones que se puedan recuperar." });
+        const now = new Date();
+        const todayKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
+        const shiftDays = Math.round((Date.parse(`${todayKey}T00:00:00Z`) - Date.parse(`${firstSessionDate}T00:00:00Z`)) / 86400000);
+        const shiftDate = (date) => {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date || "")) return date;
+          const shifted = new Date(`${date}T00:00:00Z`);
+          shifted.setUTCDate(shifted.getUTCDate() + shiftDays);
+          return shifted.toISOString().slice(0,10);
+        };
+        const version = db.prepare("SELECT COALESCE(MAX(version),0)+1 AS n FROM plans WHERE user_id=?").get(userId).n;
+        const dayLabels = ["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"];
+        const restored = {
+          ...source,
+          version,
+          createdAt: now.toISOString(),
+          savedAt: null,
+          restoredFromVersion: sourceVersion,
+          previousVersion: latestPlan(userId)?.version || null,
+          changeReason: `Recuperado del plan v${sourceVersion}; fechas desplazadas ${shiftDays >= 0 ? "" : "hacia atrás "}${Math.abs(shiftDays)} día(s) para empezar hoy.`,
+          goal: { ...source.goal, raceDate: shiftDate(source.goal?.raceDate) },
+          sessions: source.sessions.map((session, index) => {
+            const date = shiftDate(session.date);
+            const weekday = new Date(`${date}T12:00:00Z`).getUTCDay();
+            const { activityId, activityFileName, activityDate, readiness, readinessAt, adaptation, safetyAction, ...clean } = session;
+            return { ...clean, id: `restore-v${version}-${index}`, date, day: dayLabels[weekday], status: "pending" };
+          }),
+        };
+        const activeBeforeRestore = db.prepare("SELECT version, data FROM plans WHERE user_id=? ORDER BY version DESC LIMIT 1").get(userId);
+        if (activeBeforeRestore) {
+          const previousActive = JSON.parse(activeBeforeRestore.data);
+          previousActive.savedAt ||= now.toISOString();
+          db.prepare("UPDATE plans SET data=? WHERE user_id=? AND version=?").run(JSON.stringify(previousActive), userId, activeBeforeRestore.version);
+        }
+        if (sourceVersion !== activeBeforeRestore?.version) {
+          source.savedAt ||= now.toISOString();
+          db.prepare("UPDATE plans SET data=? WHERE user_id=? AND version=?").run(JSON.stringify(source), userId, sourceVersion);
+        }
+        db.prepare("INSERT INTO plans(user_id,version,created_at,data) VALUES(?,?,?,?)").run(userId, version, now.toISOString(), JSON.stringify(restored));
+        db.prepare("UPDATE proposals SET status='dismissed' WHERE user_id=? AND status='pending'").run(userId);
+        return json(res, 201, { plan: restored });
       }
       if (pathname.startsWith("/api/sessions/") && pathname.endsWith("/fit") && req.method === "POST") {
         const sessionId = pathname.split("/").at(-2);
@@ -784,6 +1361,7 @@ const server = createServer(async (req, res) => {
         if (!plan) return json(res, 404, { error: "No hay un plan activo." });
         const session = plan.sessions.find((item) => item.id === sessionId);
         if (!session) return json(res, 404, { error: "No se encontró la sesión." });
+        if (session.type === "strength") return json(res, 409, { error: "No se pueden asociar archivos FIT a sesiones de fuerza." });
         if (session.status === "skipped") return json(res, 409, { error: "No puedes adjuntar una actividad a una sesión marcada como omitida." });
         const buffer = await bodyBuffer(req, 40 * 1024 * 1024);
         const parsed = await parseActivity(buffer, filename);
@@ -923,17 +1501,16 @@ const server = createServer(async (req, res) => {
             plan.decisions ||= [];
             plan.decisions.push({ code: "SESSION_CANCELLED_SAFETY", ruleId: "READINESS-RED-001", reason: session.safetyAction, sessionId });
           } else if (yellow) {
-            scaleSessionDuration(session, Math.max(10, Math.round(Number(session.durationMin || 30) * 0.75)));
+            const reducedDuration=session.type==="run"?Math.max(30,Math.floor(Number(session.durationMin||30)*0.75/5)*5):Math.max(10,Math.round(Number(session.durationMin||30)*0.75));
+            scaleSessionDuration(session, reducedDuration);
             if (session.type === "run") {
               session.title = session.title.includes("Tirada") ? "Rodaje largo reducido · fácil" : "Rodaje fácil reducido";
-              session.category = "EASY_RUN";
+              session.category = "DELOAD_RUN";
               session.effort = "RPE 2–3 · fácil";
-              if (session.distanceKm) session.distanceKm = Math.round(session.distanceKm * 0.75 * 10) / 10;
-              session.details = "Sesión reducida por preparación amarilla. Mantén conversación fluida, elimina los bloques de calidad y detente si el dolor aumenta.";
+              session.paceReference = null;
+              refreshRunSessionPrescription(session, reducedDuration, goal(userId));
             } else {
-              session.title = "Fuerza ligera · volumen reducido";
-              session.effort = "RIR 4 · ligero, sin dolor";
-              session.details = session.details.replace(/(\d+) ×/g, (_, count) => `${Math.max(1, Number(count)-1)} ×`) + " Reduce accesorios y detén cualquier movimiento que cause dolor.";
+              reduceStrengthSession(session, " Reduce accesorios y detén cualquier movimiento que cause dolor.");
             }
             session.safetyAction = "Preparación amarilla: carga reducida. Reevalúa durante el calentamiento y cancela si aparece dolor creciente o cambia la técnica.";
             session.adaptation = "DELOAD · READINESS-YELLOW-001";
@@ -996,21 +1573,25 @@ const server = createServer(async (req, res) => {
           if(assessment.state==="DELOAD"||assessment.state==="REGRESS") {
             const factor=assessment.state==="DELOAD"?0.8:0.7;
             const next={...session,effort:"RPE 2–3 · fácil y controlado",adaptation:`${assessment.state} · ${assessment.ruleId}`,safetyAction:assessment.reason};
-            scaleSessionDuration(next,Math.max(10,Math.round(Number(session.durationMin||30)*factor)));
-            if(next.type==="run") { next.title=session.title.includes("Tirada")?"Tirada reducida y fácil":"Rodaje fácil reducido"; next.category="EASY_RUN"; next.details="Sesión reducida según la revisión semanal. No recuperes sesiones perdidas ni acumules carga."; }
-            else { next.title="Fuerza ligera · descarga"; next.details=session.details.replace(/(\d+) ×/g,(_,n)=>`${Math.max(1,Number(n)-1)} ×`); }
+            const reducedDuration=next.type==="run"?Math.max(30,Math.floor(Number(session.durationMin||30)*factor/5)*5):Math.max(10,Math.round(Number(session.durationMin||30)*factor));
+            scaleSessionDuration(next,reducedDuration);
+            if(next.type==="run") { next.title=session.title.includes("Tirada")?"Tirada reducida y fácil":"Rodaje fácil reducido"; next.category="DELOAD_RUN"; next.paceReference=null; refreshRunSessionPrescription(next,reducedDuration,goal(userId)); }
+            else reduceStrengthSession(next);
             return next;
           }
           if(assessment.state==="PROGRESS"&&session.type==="run"&&completedRunMinutes>0) {
-            let duration=Math.round(Number(session.durationMin||20)*(1+progressionPct));
+            let duration=Math.floor(Number(session.durationMin||30)*(1+progressionPct)/5)*5;
             const athleteProfile=profile(userId);
             const sessionDay=new Date(`${session.date}T12:00:00`).getDay();
             const sessionDayIndex=(sessionDay+6)%7;
             const dayLimit=Number(athleteProfile?.trainingSchedule?.[sessionDayIndex]?.maxSessionMinutes||athleteProfile?.maxSessionMinutes||300);
-            duration=Math.min(duration,dayLimit);
-            if(session.category==="LONG_RUN"&&completedLongestRun>0) duration=Math.min(duration,Math.round(completedLongestRun*(1+progressionPct)));
+            const otherDayMinutes=plan.sessions.filter((other)=>other.id!==session.id&&other.date===session.date&&other.status==="pending"&&other.type!=="race").reduce((sum,other)=>sum+Number(other.durationMin||0),0);
+            duration=Math.min(duration,Math.floor((dayLimit-otherDayMinutes)/5)*5);
+            if(session.category==="LONG_RUN"&&completedLongestRun>0) duration=Math.min(duration,Math.floor(completedLongestRun*(1+progressionPct)/5)*5);
+            if(duration<30) return {...session,status:"skipped",adaptation:`SESSION_REMOVED · ${assessment.ruleId}`,safetyAction:"Se omitió para respetar el mínimo de 30 min y el límite conjunto del día; no la recuperes en otra fecha."};
             const next={...session,adaptation:`PROGRESS · ${assessment.ruleId}`,safetyAction:`Carga ajustada un máximo de ${Math.round(progressionPct*100)}% tras cumplimiento alto y recuperación adecuada.`};
             scaleSessionDuration(next,duration);
+            refreshRunSessionPrescription(next,duration,goal(userId));
             return next;
           }
           return {...session,adaptation:`${assessment.state} · ${assessment.ruleId}`,safetyAction:assessment.reason};
@@ -1066,9 +1647,16 @@ const server = createServer(async (req, res) => {
           ...proposal.plan,
           version,
           createdAt: new Date().toISOString(),
+          savedAt: null,
           previousVersion: proposal.planVersion,
           changeReason: proposal.reason,
         };
+        const previousPlan = db.prepare("SELECT data FROM plans WHERE user_id=? AND version=?").get(userId, latest.version);
+        if (previousPlan) {
+          const archived = JSON.parse(previousPlan.data);
+          archived.savedAt ||= revised.createdAt;
+          db.prepare("UPDATE plans SET data=? WHERE user_id=? AND version=?").run(JSON.stringify(archived), userId, latest.version);
+        }
         db.prepare(
           "INSERT INTO plans(user_id,version,created_at,data) VALUES(?,?,?,?)",
         ).run(userId, version, revised.createdAt, JSON.stringify(revised));
