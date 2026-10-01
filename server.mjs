@@ -144,15 +144,15 @@ function weeklyPlanEmail(plan, sessions, range) {
     const dateHeading = fmtDate(date);
     if (!items.length) return { date, text: `${dateHeading}\nDescanso.`, html: `<tr><td style="padding:15px 16px;border-bottom:1px solid #edf1ec"><strong style="text-transform:capitalize">${emailEscape(dateHeading)}</strong><p style="margin:5px 0 0;color:#738078">Descanso</p></td></tr>` };
     const text = items.map((session) => {
-      const environment = session.environment === "treadmill" ? "Cinta" : session.environment === "outdoor" ? "Exterior" : "";
-      const kind = session.type === "strength" ? "Fuerza" : session.type === "race" ? "Competición" : "Carrera";
+      const environment = session.environment === "treadmill" ? "Cinta" : session.environment === "outdoor" ? "Exterior" : session.environmentOptions?.length ? session.environmentOptions.map((item) => item === "treadmill" ? "Cinta" : "Calle").join(" o ") : "";
+      const kind = session.type === "strength" ? "Fuerza" : session.type === "race" ? "Competición" : session.type === "recovery" ? "Recuperación" : "Carrera";
       const stats = [`Duración: ${duration(session.durationMin)}`, `Distancia: ${distance(session.distanceKm)}`, `Esfuerzo: ${session.effort || "—"}`, `Estado: ${statusLabel(session.status)}`].join(" · ");
       const exercises = (session.strengthExercises || []).map((exercise) => `  • ${exercise.name}: ${exercise.sets} × ${exercise.reps} · RIR ${exercise.rir} · descanso ${exercise.restSec} s`).join("\n");
       return `${session.title}\n${kind}${environment ? ` · ${environment}` : ""} · ${stats}\n${session.details || ""}${exercises ? `\nEjercicios:\n${exercises}` : ""}`;
     }).join("\n\n");
     const htmlSessions = items.map((session) => {
-      const environment = session.environment === "treadmill" ? " · Cinta" : session.environment === "outdoor" ? " · Exterior" : "";
-      const kind = session.type === "strength" ? "Fuerza" : session.type === "race" ? "Competición" : "Carrera";
+      const environment = session.environment === "treadmill" ? " · Cinta" : session.environment === "outdoor" ? " · Exterior" : session.environmentOptions?.length ? ` · ${session.environmentOptions.map((item) => item === "treadmill" ? "Cinta" : "Calle").join(" o ")}` : "";
+      const kind = session.type === "strength" ? "Fuerza" : session.type === "race" ? "Competición" : session.type === "recovery" ? "Recuperación" : "Carrera";
       const exercises = (session.strengthExercises || []).length ? `<ul style="padding-left:20px;margin:8px 0">${session.strengthExercises.map((exercise) => `<li style="margin:4px 0">${emailEscape(exercise.name)} · ${emailEscape(exercise.sets)} × ${emailEscape(exercise.reps)} · RIR ${emailEscape(exercise.rir)} · descanso ${emailEscape(exercise.restSec)} s</li>`).join("")}</ul>` : "";
       return `<div style="padding:12px 0;border-top:1px solid #edf1ec"><strong>${emailEscape(session.title)}</strong><div style="margin:5px 0;color:#55735f;font-size:13px">${kind}${environment} · ${emailEscape(duration(session.durationMin))} · ${emailEscape(distance(session.distanceKm))} · ${emailEscape(statusLabel(session.status))}</div>${session.effort ? `<p style="margin:5px 0;font-size:13px"><b>Esfuerzo:</b> ${emailEscape(session.effort)}</p>` : ""}<p style="margin:6px 0;line-height:1.55;white-space:pre-line">${emailEscape(session.details || "")}</p>${exercises}</div>`;
     }).join("");
@@ -1669,6 +1669,58 @@ const server = createServer(async (req, res) => {
         return json(res, 200, exportData(userId), {
           "Content-Disposition": 'attachment; filename="rompesuelas-copia.json"',
         });
+      if (pathname === "/api/import-plan" && req.method === "POST") {
+        const incoming = await bodyJson(req, 16 * 1024 * 1024);
+        const sourcePlan = incoming?.plan;
+        const supportedDistances = [5, 10, 21.1];
+        if (incoming?.format !== "stride-plan-import-v1" || !sourcePlan || !supportedDistances.includes(Number(sourcePlan.goal?.distanceKm)) || !/^\d{4}-\d{2}-\d{2}$/.test(sourcePlan.goal?.raceDate || "") || !Array.isArray(sourcePlan.sessions) || sourcePlan.sessions.length < 1 || sourcePlan.sessions.length > 500 || !Number.isInteger(Number(sourcePlan.weeks)) || Number(sourcePlan.weeks) < 1 || Number(sourcePlan.weeks) > 60)
+          return json(res, 400, { error: "El archivo no contiene un plan compatible con Rompesuelas." });
+        const validTypes = new Set(["run", "strength", "recovery", "race"]);
+        const dateIsValid = (date) => {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date || "")) return false;
+          const parsed = new Date(`${date}T12:00:00Z`);
+          return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date;
+        };
+        if (sourcePlan.sessions.some((item) => !item || !validTypes.has(item.type) || !dateIsValid(item.date) || typeof item.title !== "string" || !item.title.trim() || item.title.length > 200 || typeof item.details !== "string" || item.details.length > 8000))
+          return json(res, 400, { error: "El plan incluye una sesión con datos incompletos o no válidos." });
+        const latest = db.prepare("SELECT version,data FROM plans WHERE user_id=? ORDER BY version DESC LIMIT 1").get(userId);
+        const version = Number(db.prepare("SELECT COALESCE(MAX(version),0)+1 AS n FROM plans WHERE user_id=?").get(userId).n);
+        const now = new Date().toISOString();
+        const dayLabels = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+        const imported = {
+          ...sourcePlan,
+          version,
+          createdAt: now,
+          savedAt: null,
+          restoredFromVersion: null,
+          previousVersion: latest ? Number(latest.version) : null,
+          importedFrom: typeof incoming.source?.fileName === "string" ? incoming.source.fileName.slice(0, 180) : "Archivo JSON de plan",
+          sessions: sourcePlan.sessions.map((item, index) => {
+            const weekday = new Date(`${item.date}T12:00:00Z`).getUTCDay();
+            return {
+              ...item,
+              id: `import-v${version}-${index + 1}`,
+              date: item.date,
+              day: dayLabels[weekday],
+              week: Number(item.week),
+              status: ["completed", "skipped", "pending"].includes(item.status) ? item.status : "pending",
+            };
+          }).sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title)),
+        };
+        db.exec("BEGIN IMMEDIATE");
+        try {
+          if (latest) {
+            const previous = JSON.parse(latest.data);
+            previous.savedAt ||= now;
+            db.prepare("UPDATE plans SET data=? WHERE user_id=? AND version=?").run(JSON.stringify(previous), userId, latest.version);
+          }
+          db.prepare("INSERT INTO plans(user_id,version,created_at,data) VALUES(?,?,?,?)").run(userId, version, now, JSON.stringify(imported));
+          saveSingleton("goal", userId, imported.goal);
+          db.prepare("UPDATE proposals SET status='dismissed' WHERE user_id=? AND status='pending'").run(userId);
+          db.exec("COMMIT");
+        } catch (error) { db.exec("ROLLBACK"); throw error; }
+        return json(res, 201, { ok: true, plan: imported, preservedProfileAndActivities: true });
+      }
       if (pathname === "/api/import-backup" && req.method === "POST") {
         const backup = await bodyJson(req, 256 * 1024 * 1024);
         if (

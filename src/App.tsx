@@ -51,6 +51,7 @@ type Session = {
   details: string;
   status: string;
   environment?: "outdoor" | "treadmill";
+  environmentOptions?: ("outdoor" | "treadmill")[];
   trainingDistanceKm?: number;
   strengthTemplate?: string;
   strengthExercises?: { name: string; pattern: string; equipment: string[]; role: string; sets: number; reps: string; rir: number; restSec: number }[];
@@ -477,6 +478,20 @@ function weekDates(day: string) {
     d.setDate(date.getDate() + i);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   });
+}
+function planWeekForDate(plan: Plan | null | undefined, dateISO: string) {
+  if (!plan || !plan.sessions.length) return 1;
+  const firstSessionDate = plan.sessions.reduce(
+    (earliest, session) => session.date < earliest ? session.date : earliest,
+    plan.sessions[0].date,
+  );
+  const start = new Date(`${firstSessionDate}T12:00:00`);
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  const current = new Date(`${dateISO}T12:00:00`);
+  const startUTC = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
+  const currentUTC = Date.UTC(current.getFullYear(), current.getMonth(), current.getDate());
+  const offsetWeeks = Math.floor((currentUTC - startUTC) / (7 * 24 * 60 * 60 * 1000));
+  return Math.min(plan.weeks, Math.max(1, offsetWeeks + 1));
 }
 function formatMinutes(minutes?: number | null) {
   if (!minutes) return "—";
@@ -1592,6 +1607,8 @@ function SessionIcon({ type }: { type: string }) {
     <Dumbbell size={17} />
   ) : type === "race" ? (
     <Target size={17} />
+  ) : type === "recovery" ? (
+    <Activity size={17} />
   ) : (
     <Footprints size={17} />
   );
@@ -1631,7 +1648,7 @@ function SessionPill({
       <div className="session-info">
         <div className="session-title-row">
           <button type="button" disabled={!onOpenDetails} className="session-title-open" onClick={onOpenDetails}>{session.title}</button>
-          {session.environment && <span className="today-tag">{session.environment === "treadmill" ? "CINTA" : "EXTERIOR"}</span>}
+          {(session.environment || session.environmentOptions?.length) && <span className="today-tag">{session.environment ? session.environment === "treadmill" ? "CINTA" : "EXTERIOR" : session.environmentOptions?.map((environment) => environment === "treadmill" ? "CINTA" : "CALLE").join(" / ")}</span>}
           {today && <span className="today-tag">HOY</span>}
           {session.status === "completed" && (
             <span className="completed-tag">
@@ -1648,7 +1665,7 @@ function SessionPill({
             ? "Fuerza"
             : session.type === "race"
               ? "Competición"
-              : "Carrera"}
+              : session.type === "recovery" ? "Recuperación" : "Carrera"}
           {session.phase && ` · ${session.phase}`}
         </span>
         {!compact && <p>{session.details}</p>}
@@ -1736,11 +1753,11 @@ function PlanView({
   runAction: <T>(fn: () => Promise<T>, success?: string) => Promise<T | null>;
   refresh: () => Promise<void>;
 }) {
-  const [week, setWeek] = useState(1);
+  const plan = data.plan;
+  const [week, setWeek] = useState(() => planWeekForDate(plan, todayISO()));
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [fitUploadingId, setFitUploadingId] = useState<string | null>(null);
   const [weeklyEmailConfig, setWeeklyEmailConfig] = useState<{ configured: boolean; recipient: string; issue?: string | null; missing?: string[]; range: { from: string; to: string } } | null>(null);
-  const plan = data.plan;
   useEffect(() => {
     api<{ configured: boolean; recipient: string; issue?: string | null; missing?: string[]; range: { from: string; to: string } }>("/api/email/week/status")
       .then(setWeeklyEmailConfig)
@@ -1767,7 +1784,7 @@ function PlanView({
     if (result) await refresh();
   }
   useEffect(() => {
-    if (plan) setWeek(Math.min(Math.max(1, week), plan.weeks));
+    if (plan) setWeek(planWeekForDate(plan, todayISO()));
   }, [plan?.version, plan?.weeks]);
   if (!plan)
     return (
@@ -1968,7 +1985,7 @@ function PlanView({
                       ? `${daySessions.length} SESIONES`
                       : session.type === "strength"
                         ? "FUERZA"
-                        : "CARRERA"
+                        : session.type === "recovery" ? "RECUPERACIÓN" : "CARRERA"
                     : "DESCANSO"}
                 </i>
               </button>
@@ -2063,7 +2080,7 @@ function PlanView({
           <button className="icon-button session-detail-close" aria-label="Cerrar detalle" onClick={()=>setSelectedSession(null)}><X size={18}/></button>
           <div className="eyebrow">SEMANA {session.week} · {session.phase}</div>
           <h2 id={`session-detail-${session.id}`}>{session.title}</h2>
-          <p className="session-detail-date">{prettyDate(session.date,{weekday:"long",day:"numeric",month:"long",year:"numeric"})} · {session.type==="strength"?"Fuerza":session.type==="race"?"Competición":"Carrera"}{session.environment?` · ${session.environment==="treadmill"?"cinta":"exterior"}`:""}</p>
+          <p className="session-detail-date">{prettyDate(session.date,{weekday:"long",day:"numeric",month:"long",year:"numeric"})} · {session.type==="strength"?"Fuerza":session.type==="race"?"Competición":session.type==="recovery"?"Recuperación":"Carrera"}{session.environment?` · ${session.environment==="treadmill"?"cinta":"exterior"}`:session.environmentOptions?.length?` · ${session.environmentOptions.map((environment)=>environment==="treadmill"?"cinta":"exterior").join(" o ")}`:""}</p>
           <div className="session-detail-stats"><span><small>DURACIÓN</small><strong>{formatMinutes(session.durationMin)}</strong></span><span><small>DISTANCIA</small><strong>{formatDistance(session.distanceKm)}</strong></span><span><small>ESFUERZO</small><strong>{session.effort}</strong></span><span><small>ESTADO</small><strong>{session.status==="completed"?"Completada":session.status==="skipped"?"Omitida":"Pendiente"}</strong></span></div>
           <div className="session-detail-description">{session.details}</div>
           {session.type === "strength" && session.strengthExercises?.length ? <div className="strength-session-exercises">{session.strengthExercises.map((exercise) => <article className="strength-session-exercise" key={`${session.id}-${exercise.name}`}><strong>{exercise.name}</strong><span>{exercise.pattern} · {exercise.equipment.join(" / ")}</span><small>{exercise.sets} × {exercise.reps} · RIR {exercise.rir} · descanso {exercise.restSec} s</small></article>)}</div> : null}
@@ -3984,6 +4001,7 @@ function SettingsView({
   refresh: () => Promise<void>;
 }) {
   const [backupBusy, setBackupBusy] = useState(false);
+  const [planImportBusy, setPlanImportBusy] = useState(false);
   async function downloadBackup() {
     setBackupBusy(true);
     const result = await runAction(async () => {
@@ -4010,6 +4028,17 @@ function SettingsView({
       });
       await refresh();
     }, "Copia restaurada correctamente.");
+  }
+  async function importTrainingPlan(file?: File) {
+    if (!file) return;
+    setPlanImportBusy(true);
+    const result = await runAction(async () => {
+      const planFile = JSON.parse(await file.text());
+      await api("/api/import-plan", { method: "POST", body: JSON.stringify(planFile) });
+      await refresh();
+    }, "Plan importado y activado. Tu plan anterior se conservó en el histórico.");
+    setPlanImportBusy(false);
+    return result;
   }
   return (
     <div className="settings-layout">
@@ -4065,6 +4094,15 @@ function SettingsView({
                 e.currentTarget.value = "";
               }}
             />
+          </label>
+        </section>
+        <section className="panel settings-card">
+          <div className="settings-card-icon"><CalendarDays size={19} /></div>
+          <h3>Importa un plan JSON</h3>
+          <p>Añade un plan como nueva versión activa. Se conservarán tu perfil, actividades y planes anteriores.</p>
+          <label className="button button-outline settings-file-label">
+            {planImportBusy ? "Importando…" : "Seleccionar plan JSON"}
+            <input type="file" accept="application/json,.json" disabled={planImportBusy} onChange={(e) => { void importTrainingPlan(e.currentTarget.files?.[0]); e.currentTarget.value = ""; }} />
           </label>
         </section>
       </div>
